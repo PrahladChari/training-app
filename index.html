@@ -223,6 +223,126 @@
       color: #666;
     }
 
+    /* ── Generate button ── */
+    .btn-generate {
+      width: 100%;
+      padding: 12px 20px;
+      background: #3a7bfd;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+      letter-spacing: 0.01em;
+    }
+    .btn-generate:hover  { background: #2563eb; }
+    .btn-generate:active { background: #1d4ed8; }
+
+    .status-msg {
+      max-width: 680px;
+      margin: 14px auto 0;
+      font-size: 13px;
+      color: #444;
+      background: #f0f4ff;
+      border: 1px solid #c7d9fe;
+      border-radius: 5px;
+      padding: 10px 14px;
+      display: none;
+    }
+
+    /* ── Preview table ── */
+    .preview-section {
+      max-width: 900px;
+      margin: 24px auto 0;
+    }
+
+    .preview-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .preview-header h2 {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .preview-meta {
+      font-size: 13px;
+      color: #888;
+    }
+
+    .preview-scroll {
+      overflow-x: auto;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+    }
+
+    .preview-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .preview-table th {
+      background: #f5f5f5;
+      padding: 9px 12px;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #888;
+      border-bottom: 1px solid #e0e0e0;
+      position: sticky;
+      top: 0;
+    }
+
+    .preview-table td {
+      padding: 7px 12px;
+      border-bottom: 1px solid #f0f0f0;
+      color: #1a1a1a;
+      vertical-align: middle;
+    }
+
+    .preview-table tr.week-first td {
+      border-top: 2px solid #e0e0e0;
+    }
+
+    .preview-table tr.historical td {
+      color: #b0b0b0;
+      background: #fafafa;
+    }
+
+    .preview-table tr.race-day td {
+      background: #f0f4ff;
+      font-weight: 600;
+      border-top: 2px solid #3a7bfd;
+    }
+
+    .notes-cell {
+      color: #666;
+      max-width: 220px;
+      white-space: normal;
+      word-break: break-word;
+      line-height: 1.4;
+    }
+
+    .guidance-cell {
+      color: #555;
+      max-width: 320px;
+      white-space: normal;
+      word-break: break-word;
+      line-height: 1.4;
+    }
+
+    .preview-table tr.historical .notes-cell    { color: #c0c0c0; }
+    .preview-table tr.historical .guidance-cell { color: #c0c0c0; }
+
     @media (max-width: 540px) {
       .two-col,
       .fitness-grid {
@@ -276,6 +396,24 @@
           <div id="customDistanceWrap" style="display: none; margin-top: 8px;">
             <input type="text" id="customDistance" name="customDistance" placeholder="e.g. 50K, 100 miles, 15K" />
           </div>
+        </div>
+      </div>
+
+      <div class="two-col" style="margin-top: 20px;">
+        <div class="field">
+          <label for="perfDist">Reference distance <span class="optional-tag">optional</span></label>
+          <select id="perfDist" name="perfDist">
+            <option value="">— Select —</option>
+            <option value="5k">5K</option>
+            <option value="10k">10K</option>
+            <option value="half">Half Marathon</option>
+            <option value="full">Marathon</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="perfTime">Your time <span class="optional-tag">optional</span></label>
+          <input type="text" id="perfTime" name="perfTime" placeholder="e.g. 25:00 or 1:05:30" />
+          <p class="hint">A recent result — used to personalise pace targets</p>
         </div>
       </div>
     </div>
@@ -404,9 +542,614 @@
       </div>
     </div>
 
+    <!-- Submit -->
+    <div style="margin-top: 36px; padding-top: 28px; border-top: 1px solid #e8e8e8;">
+      <button type="submit" class="btn-generate">Generate Training Plan</button>
+    </div>
+
   </form>
 
+  <div class="status-msg" id="statusMsg"></div>
+
+  <div class="preview-section" id="previewSection" style="display: none;">
+    <div class="preview-header">
+      <h2>Training Schedule</h2>
+      <span class="preview-meta" id="previewMeta"></span>
+    </div>
+    <div class="preview-scroll">
+      <table class="preview-table">
+        <thead>
+          <tr>
+            <th>Wk</th>
+            <th>Week Start</th>
+            <th>Date</th>
+            <th>Day</th>
+            <th>Type</th>
+            <th>Distance / Duration</th>
+            <th>Notes</th>
+            <th>Session Guidance</th>
+          </tr>
+        </thead>
+        <tbody id="previewTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <script>
+    // ── Schedule Generation ───────────────────────────────────────
+
+    const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+
+    // Last entry in each array is always the long-run slot (Saturday)
+    const RUN_SLOTS = {
+      1: [5],
+      2: [2, 5],
+      3: [0, 3, 5],
+      4: [0, 2, 4, 5],
+      5: [0, 1, 3, 5, 6],
+      6: [0, 1, 2, 4, 5, 6],
+      7: [0, 1, 2, 3, 4, 5, 6],
+    };
+
+    function addDays(date, n) {
+      const d = new Date(date);
+      d.setDate(d.getDate() + n);
+      return d;
+    }
+
+    function isoDate(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+
+    function parseLocalDate(str) {
+      if (!str) return null;
+      const [y, m, d] = str.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    }
+
+    function getMonday(date) {
+      const d = new Date(date);
+      const dow = d.getDay();
+      d.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
+      return d;
+    }
+
+    // ── Injury Parsing ────────────────────────────────────────────
+    const INJURY_KEYWORDS = {
+      'knee':            { avoid: ['interval', 'hill', 'speed'],          note: 'Avoid downhill running and lateral movements' },
+      'shin':            { avoid: ['interval', 'speed'],                   note: 'Prefer soft surfaces; reduce pace' },
+      'it band':         { avoid: ['hill', 'long run'],                    note: 'Add hip strengthening; avoid cambered roads' },
+      'hip':             { avoid: ['hill', 'tempo'],                       note: 'Reduce intensity; prioritise hip mobility' },
+      'back':            { avoid: ['heavy', 'lift'],                       note: 'Avoid loaded spinal compression; focus on core' },
+      'plantar':         { avoid: ['speed', 'hill'],                       note: 'Stretch calves and plantar fascia daily' },
+      'ankle':           { avoid: ['trail', 'uneven'],                     note: 'Stick to flat even surfaces' },
+      'hamstring':       { avoid: ['interval', 'speed', 'tempo'],          note: 'No explosive efforts; ease into every run' },
+      'calf':            { avoid: ['speed', 'hill'],                       note: 'Avoid uphills; reduce pace' },
+      'achilles':        { avoid: ['speed', 'hill', 'interval'],           note: 'Avoid steep inclines; no sprinting' },
+      'stress fracture': { avoid: ['run', 'impact'],                       note: 'No impact — cross-train only until medically cleared' },
+      'fracture':        { avoid: ['run', 'impact'],                       note: 'No impact — cross-train only until medically cleared' },
+    };
+
+    function parseInjuries(text) {
+      if (!text || !text.trim()) return { severity: 'none', modifications: [], keywords: [] };
+      const lower = text.toLowerCase();
+      const found = [], mods = [];
+      for (const [kw, mod] of Object.entries(INJURY_KEYWORDS)) {
+        if (lower.includes(kw)) { found.push(kw); mods.push(mod); }
+      }
+      const severeWords   = ['surgery','fracture','broken','torn',"can't run",'cannot run','unable to run','non-weight'];
+      const moderateWords = ['significant','limiting','chronic','persistent','multiple','severe'];
+      let severity = found.length > 0 ? 'mild' : 'none';
+      if (found.length >= 2 || moderateWords.some(w => lower.includes(w))) severity = 'moderate';
+      if (severeWords.some(w => lower.includes(w)))                         severity = 'severe';
+      return { severity, modifications: mods, keywords: found };
+    }
+
+    // ── Phases ────────────────────────────────────────────────────
+    function calculatePhases(totalWeeks) {
+      if (totalWeeks <= 3) return { base: 0, build: 0, peak: 1, taper: Math.max(0, totalWeeks - 1) };
+      const taper = Math.max(1, Math.round(totalWeeks * 0.10));
+      const peak  = Math.max(1, Math.round(totalWeeks * 0.20));
+      const base  = Math.round(totalWeeks * 0.35);
+      const build = Math.max(1, totalWeeks - base - peak - taper);
+      return { base, build, peak, taper };
+    }
+
+    function getPhaseForWeek(weekIdx, phases) {
+      let i = weekIdx;
+      if (i < phases.base)  return { name: 'Base',  indexInPhase: i, totalInPhase: phases.base };
+      i -= phases.base;
+      if (i < phases.build) return { name: 'Build', indexInPhase: i, totalInPhase: phases.build };
+      i -= phases.build;
+      if (i < phases.peak)  return { name: 'Peak',  indexInPhase: i, totalInPhase: phases.peak };
+      i -= phases.peak;
+      return { name: 'Taper', indexInPhase: i, totalInPhase: phases.taper };
+    }
+
+    function isCutbackWeek(weekIdx, phases) {
+      const p = getPhaseForWeek(weekIdx, phases);
+      if (p.name === 'Peak' || p.name === 'Taper') return false;
+      return (p.indexInPhase + 1) % 4 === 0;
+    }
+
+    // ── Mileage Tables ────────────────────────────────────────────
+    // Peak weekly mileage (miles) — based on Hal Higdon, Nike Run Club, standard plans
+    const PEAK_MILEAGE = {
+      '5k':     { beginner: 16, intermediate: 25, advanced: 35 },
+      '10k':    { beginner: 21, intermediate: 30, advanced: 45 },
+      'half':   { beginner: 28, intermediate: 40, advanced: 55 },
+      'full':   { beginner: 40, intermediate: 55, advanced: 70 },
+      'custom': { beginner: 25, intermediate: 38, advanced: 55 },
+    };
+
+    // Peak long run distance (miles)
+    const PEAK_LONG_RUN = {
+      '5k':     { beginner: 5,  intermediate: 7,  advanced: 9  },
+      '10k':    { beginner: 6,  intermediate: 10, advanced: 13 },
+      'half':   { beginner: 10, intermediate: 13, advanced: 16 },
+      'full':   { beginner: 18, intermediate: 20, advanced: 22 },
+      'custom': { beginner: 10, intermediate: 13, advanced: 16 },
+    };
+
+    function getPeakMileage(distance, fitnessCardio) {
+      return (PEAK_MILEAGE[distance] || PEAK_MILEAGE['half'])[fitnessCardio] || 35;
+    }
+
+    function calcWeeklyMileage(weekIdx, phases, startMileage, peakMileage) {
+      const p = getPhaseForWeek(weekIdx, phases);
+      const prog = p.totalInPhase > 1 ? p.indexInPhase / (p.totalInPhase - 1) : 1;
+      const buildStart = Math.max(startMileage, peakMileage * 0.60);
+      let target;
+      switch (p.name) {
+        case 'Base':  target = startMileage + (buildStart - startMileage) * prog; break;
+        case 'Build': target = buildStart   + (peakMileage - buildStart)  * prog; break;
+        case 'Peak':  target = peakMileage  * (1 - 0.05 * prog);                  break;
+        case 'Taper': target = peakMileage  * (0.80 - 0.30 * prog);               break;
+        default:      target = startMileage;
+      }
+      if (isCutbackWeek(weekIdx, phases)) target *= 0.80;
+      return Math.max(startMileage * 0.75, Math.round(target * 2) / 2);
+    }
+
+    function calcLongRunDist(weekIdx, phases, distance, fitnessCardio) {
+      const p   = getPhaseForWeek(weekIdx, phases);
+      const max = (PEAK_LONG_RUN[distance] || PEAK_LONG_RUN['half'])[fitnessCardio] || 13;
+      const prog = p.totalInPhase > 1 ? p.indexInPhase / (p.totalInPhase - 1) : 1;
+      switch (p.name) {
+        case 'Base':  return Math.round(max * (0.40 + 0.25 * prog));
+        case 'Build': return Math.round(max * (0.70 + 0.30 * prog));
+        case 'Peak':  return max;
+        case 'Taper': return Math.round(max * (0.65 - 0.25 * prog));
+        default:      return Math.round(max * 0.50);
+      }
+    }
+
+    // ── Pace Utilities ────────────────────────────────────────────
+    const DIST_MILES = { '5k': 3.10686, '10k': 6.21371, 'half': 13.1094, 'full': 26.2188 };
+
+    function parseTime(str) {
+      if (!str || !str.trim()) return null;
+      const parts = str.trim().split(':').map(Number);
+      if (parts.some(isNaN) || parts.length < 2 || parts.length > 3) return null;
+      return parts.length === 3
+        ? parts[0] * 3600 + parts[1] * 60 + parts[2]
+        : parts[0] * 60 + parts[1];
+    }
+
+    function getRacePaceSec(timeStr, distKey) {
+      const secs  = parseTime(timeStr);
+      const miles = DIST_MILES[distKey];
+      return (secs && miles) ? secs / miles : null; // seconds per mile
+    }
+
+    function formatPace(secPerMile, units) {
+      const s   = units === 'metric' ? secPerMile / 1.60934 : secPerMile;
+      const min = Math.floor(s / 60);
+      const sec = Math.round(s % 60);
+      return `${min}:${String(sec).padStart(2, '0')}${units === 'metric' ? '/km' : '/mi'}`;
+    }
+
+    // ── Workout Types ─────────────────────────────────────────────
+    function getWorkoutTypes(phase, fitnessCardio, numRunSlots, injuryProfile) {
+      const avoiding = kw => injuryProfile.modifications.some(m =>
+        m.avoid.some(a => kw.toLowerCase().includes(a.toLowerCase()))
+      );
+      const types = [];
+      for (let i = 0; i < numRunSlots - 1; i++) {
+        if (phase.name === 'Taper') {
+          types.push(i === 0 ? 'Recovery Run' : 'Easy Run');
+        } else if (i === 0 && phase.name !== 'Base' && fitnessCardio !== 'beginner' && !avoiding('tempo')) {
+          types.push('Tempo Run');
+        } else if (i === 0 && phase.name === 'Base' && fitnessCardio === 'advanced' && !avoiding('stride')) {
+          types.push('Easy Run w/ Strides');
+        } else if (i === 1 && (phase.name === 'Build' || phase.name === 'Peak') && fitnessCardio !== 'beginner' && !avoiding('interval')) {
+          types.push('Interval / Speed Work');
+        } else {
+          types.push('Easy Run');
+        }
+      }
+      // Long run (last slot)
+      if (injuryProfile.severity === 'severe') {
+        types.push('Cross-Training (Long Effort)');
+      } else if (avoiding('long run')) {
+        types.push('Long Run (moderate effort — see notes)');
+      } else {
+        types.push('Long Run');
+      }
+      return types;
+    }
+
+    // ── Distance / Duration Labels ────────────────────────────────
+    function getDistLabel(dayType, weeklyMiles, numRunSlots, longRunMiles, units, fitnessCardio) {
+      const toDisplay = mi => {
+        const val = units === 'metric' ? Math.round(mi * 1.60934 * 2) / 2 : Math.round(mi * 2) / 2;
+        return `${val} ${units === 'metric' ? 'km' : 'mi'}`;
+      };
+      const dt = dayType.toLowerCase();
+      if (dt.includes('rest'))       return '—';
+      if (dt.includes('cross'))      return '45–60 min';
+      if (dt.includes('long run'))   return toDisplay(longRunMiles);
+      if (dt.includes('recovery'))   return toDisplay(Math.max(2, Math.round((weeklyMiles / numRunSlots) * 0.55 * 2) / 2));
+      if (dt.includes('tempo'))      return toDisplay(Math.max(2, Math.round((weeklyMiles / numRunSlots) * 0.75 * 2) / 2));
+      if (dt.includes('interval')) {
+        if (fitnessCardio === 'beginner')     return '4 × 400m w/ 90 s rest';
+        if (fitnessCardio === 'intermediate') return '6 × 800m w/ 90 s rest';
+        return '8 × 800m or 5 × 1 mi w/ 2 min rest';
+      }
+      // Easy / strides
+      const easyMiles = Math.max(2, Math.round(((weeklyMiles - longRunMiles) / Math.max(1, numRunSlots - 1)) * 2) / 2);
+      return toDisplay(easyMiles);
+    }
+
+    function getStrengthLabel() { return '45–60 min'; }
+
+    // ── Injury Notes ──────────────────────────────────────────────
+    function getInjuryNote(dayType, injuryProfile) {
+      if (injuryProfile.severity === 'none') return '';
+      const dt = dayType.toLowerCase();
+      const relevant = injuryProfile.modifications.filter(m =>
+        m.avoid.some(a => dt.includes(a.toLowerCase()))
+      );
+      const pool = relevant.length > 0 ? relevant : injuryProfile.modifications;
+      return [...new Set(pool.map(m => m.note))].join(' | ');
+    }
+
+    // ── Session Guidance ──────────────────────────────────────────
+    function getSessionGuidance(dayType, phaseName, fitnessCardio, fitnessStrength, racePaceSec, units) {
+      const dt   = dayType.toLowerCase();
+      const hasP = racePaceSec != null;
+
+      // Returns a formatted pace range string given offsets in sec/mile (positive = slower)
+      const pr = (lo, hi) => `${formatPace(racePaceSec + lo, units)}–${formatPace(racePaceSec + hi, units)}`;
+
+      // Easy-pace offsets by fitness (sec/mile above race pace)
+      const easyOff = { beginner: [120, 168], intermediate: [96, 144], advanced: [72, 108] };
+      const eo = easyOff[fitnessCardio] || easyOff.intermediate;
+
+      // Long-run offsets (sec/mile)
+      const lrOff = { beginner: [96, 144], intermediate: [80, 120], advanced: [60, 96] };
+      const lro = lrOff[fitnessCardio] || lrOff.intermediate;
+
+      if (dt === 'rest') {
+        return 'Full rest. Prioritise sleep and nutrition. Light walking or gentle stretching is fine.';
+      }
+
+      if (dt.includes('cross')) {
+        return 'Low-impact aerobic work — cycling, swimming, elliptical, or rowing at easy conversational effort (Zone 1–2). Maintain fitness without stressing the injured area.';
+      }
+
+      if (dt.includes('recovery run')) {
+        const p = hasP ? ` Target ${pr(144, 192)}.` : '';
+        return `Very easy — Zone 1 (60–65% max HR).${p} Purposely slower than your normal easy pace. Goal: flush fatigue, not build fitness.`;
+      }
+
+      if (dt.includes('easy run') && dt.includes('stride')) {
+        const p = hasP ? ` Easy portion: ${pr(...eo)}.` : '';
+        return `Easy aerobic run with strides.${p} In the final 10 min: 4–6 × 20 sec smooth accelerations near mile effort, with 60–90 sec walk/jog recovery between each. Stay relaxed — not a full sprint.`;
+      }
+
+      if (dt.includes('easy run')) {
+        const p = hasP ? ` Target ${pr(...eo)}.` : '';
+        const phaseNote = {
+          Base:  'Focus on building aerobic base — effort matters more than pace.',
+          Build: 'Keep truly easy on easy days to balance your quality sessions.',
+          Peak:  'Stay conservative — save your legs for quality sessions.',
+          Taper: 'Very easy — let your body absorb the training load.',
+        }[phaseName] || '';
+        return `Zone 2 effort — fully conversational, 65–75% max HR.${p} ${phaseNote}`;
+      }
+
+      if (dt.includes('tempo')) {
+        const p = hasP ? ` Target ${pr(16, 32)}.` : '';
+        const dur = { Base: '15–20 min', Build: '20–30 min', Peak: '25–40 min' }[phaseName] || '20–30 min';
+        return `Comfortably hard — 82–88% max HR, short sentences only.${p} Warm up 10–15 min easy, hold steady tempo for ${dur}, cool down 10 min. If pace drops sharply, ease off rather than forcing it.`;
+      }
+
+      if (dt.includes('interval')) {
+        const p = hasP ? ` Target ${pr(-26, -10)} per rep.` : '';
+        const reps = fitnessCardio === 'beginner' ? '4 × 400m'
+          : fitnessCardio === 'intermediate' ? '6 × 800m'
+          : '8 × 800m or 5 × 1 mi';
+        const rec = fitnessCardio === 'advanced' ? '2 min' : '90 sec';
+        return `${reps} at 5K race effort — 90–95% max HR.${p} ${rec} recovery jog between reps. Warm up 10–15 min easy beforehand. Stop if form breaks down significantly.`;
+      }
+
+      if (dt.includes('long run')) {
+        const p = hasP ? ` Target ${pr(...lro)}.` : '';
+        const fuel = phaseName === 'Base'
+          ? 'No fueling needed if under 75 min. Hydrate every 20–25 min.'
+          : phaseName === 'Build'
+          ? 'Gel or chews every 40–45 min once over 75 min. Hydrate every 20 min.'
+          : 'Practice full race-day fueling — gel every 30–40 min, hydrate every 20 min.';
+        const effort = phaseName === 'Peak'
+          ? 'Start easy. Run the final 20–30 min at goal race effort if feeling strong.'
+          : 'Conversational effort throughout — builds fat-burning efficiency and mental durability.';
+        return `${effort}${p} ${fuel}`;
+      }
+
+      if (dt.includes('strength')) {
+        const g = {
+          Base: {
+            beginner:     'Foundational: 3 × 12–15 reps, RPE 5–6. Glute bridges, bodyweight squats, calf raises, single-leg balance. Prioritise form.',
+            intermediate: 'Foundational: 3 × 10–12 reps, RPE 6–7. Goblet squats, Romanian deadlifts, step-ups, Copenhagen planks.',
+            advanced:     'Foundational: 3 × 8–10 reps, RPE 7. Barbell squats, RDLs, Bulgarian split squats, hip thrusts.',
+          },
+          Build: {
+            beginner:     'Progressive: 3 × 10–12 reps, RPE 6–7. Add light load — lunges, banded glute bridges, calf raises, dead bugs.',
+            intermediate: 'Functional: 3 × 8–10 reps, RPE 7–8. Single-leg RDLs, lateral band walks, loaded step-ups, plank variations.',
+            advanced:     'Power: 3 × 6–8 reps, RPE 8. Heavy compound lifts + plyometrics — box jumps, bounding, weighted sled work.',
+          },
+          Peak: {
+            beginner:     'Maintenance: 2 × 10 reps, RPE 5–6. Familiar exercises only. Reduce total volume ~30% — prioritise recovery.',
+            intermediate: 'Maintenance: 2–3 × 8 reps, RPE 6–7. Familiar movements. Fewer sets, same intensity.',
+            advanced:     'Maintenance: 3 × 5–6 reps, RPE 7–8. Brief and heavy. Add dynamic warm-up and mobility.',
+          },
+          Taper: {
+            beginner:     'Activation only: 1–2 × 10 reps, RPE 4. Glute bridges, calf raises, mobility drills. No new exercises.',
+            intermediate: 'Activation: 2 × 8 reps, RPE 5. Familiar movements — legs and core focus. No soreness.',
+            advanced:     'Activation: 2 × 5–6 reps, RPE 5–6. Brief, familiar, dynamic drills and hip mobility.',
+          },
+        };
+        return (g[phaseName] || g.Build)[fitnessStrength] || '';
+      }
+
+      return '';
+    }
+
+    // ── Main Generator ────────────────────────────────────────────
+    function generateSchedule(inputs) {
+      const { raceDate, raceDistance, customDistance, weeklyMileage,
+              trainingStartDate, runDays, strengthDays,
+              fitnessCardio, fitnessStrength, injuries, units,
+              perfDist, perfTime } = inputs;
+
+      // Always work internally in miles; display converts to km when metric
+      const startMileage  = units === 'metric' ? weeklyMileage / 1.60934 : weeklyMileage;
+      const racePaceSec   = getRacePaceSec(perfTime, perfDist || raceDistance);
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayMonday = getMonday(today);
+      const startDate   = trainingStartDate ? getMonday(trainingStartDate) : todayMonday;
+      const raceDateObj = parseLocalDate(raceDate);
+
+      const injuryProfile = parseInjuries(injuries);
+
+      const raceAdj = new Date(raceDateObj);
+      if (injuryProfile.severity === 'moderate') raceAdj.setDate(raceAdj.getDate() + 14);
+      if (injuryProfile.severity === 'severe')   raceAdj.setDate(raceAdj.getDate() + 28);
+
+      const totalWeeks = Math.max(1, Math.round((raceAdj - startDate) / (7 * 86400000)));
+      const histWeeks  = Math.max(0, Math.round((todayMonday - startDate) / (7 * 86400000)));
+
+      const phases    = calculatePhases(totalWeeks);
+      const peakMiles = Math.max(startMileage, getPeakMileage(raceDistance, fitnessCardio));
+
+      // Build weekly slot map (shared template, applied to every week)
+      const runSlots  = RUN_SLOTS[Math.min(7, Math.max(1, runDays))];
+      const slotTypes = Array.from({ length: 7 }, () => ({ run: false, strength: false }));
+      runSlots.forEach(i => { slotTypes[i].run = true; });
+      let sLeft = strengthDays;
+      for (let i = 0; i < 7 && sLeft > 0; i++) {
+        if (!slotTypes[i].run)                         { slotTypes[i].strength = true; sLeft--; }
+      }
+      for (let i = 0; i < 7 && sLeft > 0; i++) {
+        if (slotTypes[i].run && !slotTypes[i].strength){ slotTypes[i].strength = true; sLeft--; }
+      }
+
+      const schedule = [];
+
+      for (let w = 0; w < totalWeeks; w++) {
+        const weekStart    = addDays(startDate, w * 7);
+        const isHistorical = w < histWeeks;
+        const eff = isHistorical ? { severity: 'none', modifications: [], keywords: [] } : injuryProfile;
+        const phase      = getPhaseForWeek(w, phases);
+        const weekMiles  = calcWeeklyMileage(w, phases, startMileage, peakMiles);
+        const longMiles  = calcLongRunDist(w, phases, raceDistance, fitnessCardio);
+        const runTypes   = getWorkoutTypes(phase, fitnessCardio, runSlots.length, eff);
+        let runIdx = 0;
+
+        for (let d = 0; d < 7; d++) {
+          const slot = slotTypes[d];
+          const date = addDays(weekStart, d);
+          const parts = [], notes = [];
+
+          if (slot.run) {
+            const wt = runTypes[runIdx++] || 'Easy Run';
+            parts.push(wt);
+            const n = getInjuryNote(wt, eff);
+            if (n) notes.push(n);
+          }
+          if (slot.strength) {
+            parts.push('Strength');
+            const n = getInjuryNote('Strength', eff);
+            if (n) notes.push(n);
+          }
+          if (parts.length === 0) parts.push('Rest');
+
+          const dayType = parts.join(' + ');
+          const sessionGuidance = parts
+            .map(p => getSessionGuidance(p.trim(), phase.name, fitnessCardio, fitnessStrength, racePaceSec, units))
+            .filter(Boolean)
+            .join(' | ');
+          let distDur;
+          if (slot.run) {
+            distDur = getDistLabel(dayType, weekMiles, runSlots.length, longMiles, units, fitnessCardio);
+          } else if (slot.strength) {
+            distDur = getStrengthLabel();
+          } else {
+            distDur = '—';
+          }
+
+          if (d === 0 && !isHistorical) {
+            const cutback = isCutbackWeek(w, phases) ? ' — Cutback Week' : '';
+            notes.unshift(`${phase.name} Phase${cutback}`);
+          }
+
+          schedule.push({
+            weekStartDate: isoDate(weekStart),
+            weekNumber:    w + 1,
+            date:          isoDate(date),
+            dayOfWeek:     DAYS[d],
+            dayType,
+            distanceDuration: distDur,
+            notes:          notes.join(' | '),
+            sessionGuidance,
+            isHistorical,
+            phase:          phase.name,
+          });
+        }
+      }
+
+      // Race day row
+      const raceDow = raceAdj.getDay();
+      schedule.push({
+        weekStartDate: isoDate(getMonday(raceAdj)),
+        weekNumber:    totalWeeks + 1,
+        date:          isoDate(raceAdj),
+        dayOfWeek:     DAYS[raceDow === 0 ? 6 : raceDow - 1],
+        dayType:       'RACE DAY',
+        distanceDuration: (() => {
+          const labels = { '5k':'5K','10k':'10K','half':'Half Marathon (13.1 mi)','full':'Marathon (26.2 mi)' };
+          return labels[raceDistance] || customDistance || 'Race';
+        })(),
+        notes: injuryProfile.severity !== 'none'
+          ? `Race date shifted +${injuryProfile.severity === 'moderate' ? 2 : 4} weeks due to ${injuryProfile.keywords.join(', ')} injury`
+          : '',
+        isHistorical: false,
+        phase: 'Race',
+      });
+
+      return {
+        schedule,
+        meta: {
+          totalWeeks, histWeeks, phases, peakMiles,
+          injuryProfile,
+          raceDateOriginal: isoDate(raceDateObj),
+          raceDateAdjusted: isoDate(raceAdj),
+          units,
+        },
+      };
+    }
+
+    // ── Form Submit ───────────────────────────────────────────────
+    document.getElementById('plannerForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      const fd = new FormData(this);
+      const inputs = {
+        raceDate:           fd.get('raceDate'),
+        raceDistance:       fd.get('raceDistance'),
+        customDistance:     fd.get('customDistance') || '',
+        weeklyMileage:      parseFloat(fd.get('weeklyMileage'))  || 0,
+        trainingStartDate:  fd.get('trainingStartDate') ? parseLocalDate(fd.get('trainingStartDate')) : null,
+        runDays:            parseInt(fd.get('runDays'))      || 4,
+        strengthDays:       parseInt(fd.get('strengthDays')) || 0,
+        fitnessCardio:      fd.get('fitnessCardio')      || 'beginner',
+        fitnessStrength:    fd.get('fitnessStrength')    || 'beginner',
+        fitnessFlexibility: fd.get('fitnessFlexibility') || 'beginner',
+        injuries:           fd.get('injuries') || '',
+        units:              document.getElementById('unitToggle').checked ? 'metric' : 'imperial',
+        perfDist:           fd.get('perfDist') || '',
+        perfTime:           fd.get('perfTime') || '',
+      };
+
+      const result = generateSchedule(inputs);
+      window._currentSchedule = result;
+
+      const { totalWeeks, histWeeks, phases, injuryProfile, raceDateOriginal, raceDateAdjusted } = result.meta;
+      let msg = `Plan generated: ${totalWeeks} weeks — Base ${phases.base} / Build ${phases.build} / Peak ${phases.peak} / Taper ${phases.taper}.`;
+      if (histWeeks > 0) msg += ` Includes ${histWeeks} historical week(s) shown grayed out.`;
+      if (injuryProfile.severity !== 'none') msg += ` Race date adjusted: ${raceDateOriginal} → ${raceDateAdjusted} (${injuryProfile.severity} injury).`;
+
+      const statusEl = document.getElementById('statusMsg');
+      statusEl.textContent = msg;
+      statusEl.style.display = 'block';
+
+      renderPreview(result);
+      console.log('Schedule result:', result);
+    });
+
+    // ── Preview Table ─────────────────────────────────────────────
+    function displayDate(iso) {
+      const [y, m, d] = iso.split('-').map(Number);
+      return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+
+    const DAY_ABBR = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+    function renderPreview(result) {
+      const { schedule, meta } = result;
+      const tbody = document.getElementById('previewTbody');
+      tbody.innerHTML = '';
+
+      let lastWeekNum = null;
+
+      for (const row of schedule) {
+        const tr = document.createElement('tr');
+        const isFirstOfWeek = row.weekNumber !== lastWeekNum;
+
+        if (isFirstOfWeek)   tr.classList.add('week-first');
+        if (row.isHistorical) tr.classList.add('historical');
+        if (row.dayType === 'RACE DAY') tr.classList.add('race-day');
+
+        const dayIdx = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].indexOf(row.dayOfWeek);
+
+        const cells = [
+          { text: isFirstOfWeek ? String(row.weekNumber) : '' },
+          { text: isFirstOfWeek ? displayDate(row.weekStartDate) : '' },
+          { text: displayDate(row.date) },
+          { text: dayIdx >= 0 ? DAY_ABBR[dayIdx] : row.dayOfWeek },
+          { text: row.dayType },
+          { text: row.distanceDuration },
+          { text: row.notes, cls: 'notes-cell' },
+          { text: row.sessionGuidance || '', cls: 'guidance-cell' },
+        ];
+
+        cells.forEach(({ text, cls }) => {
+          const td = document.createElement('td');
+          td.textContent = text;
+          if (cls) td.className = cls;
+          tr.appendChild(td);
+        });
+
+        tbody.appendChild(tr);
+        lastWeekNum = row.weekNumber;
+      }
+
+      const { totalWeeks, histWeeks, peakMiles, units } = meta;
+      const unit = units === 'metric' ? 'km' : 'mi';
+      document.getElementById('previewMeta').textContent =
+        `${totalWeeks} weeks · Peak ${peakMiles} ${unit}/wk` +
+        (histWeeks > 0 ? ` · ${histWeeks} historical week${histWeeks > 1 ? 's' : ''} shown` : '');
+
+      const section = document.getElementById('previewSection');
+      section.style.display = 'block';
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
     // ── Units toggle ──────────────────────────────────────────────
     const unitToggle = document.getElementById('unitToggle');
 

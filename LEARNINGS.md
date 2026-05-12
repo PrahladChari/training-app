@@ -59,6 +59,83 @@ The `@media` query at the bottom collapses both grids to a single column on smal
 
 ---
 
+---
+
+## 2026-05-12 — Schedule Generation
+
+### Phases and progressive overload
+
+The training plan uses a classic four-phase structure: **Base → Build → Peak → Taper**. Each phase has a different goal:
+
+- **Base**: build an aerobic foundation at comfortable effort. Mileage rises slowly. No intensity work for beginners.
+- **Build**: add quality workouts (tempo runs, intervals). Mileage continues climbing.
+- **Peak**: highest mileage and most race-specific work. Short — 1–2 weeks.
+- **Taper**: reduce volume so the body can recover and arrive at race day fresh.
+
+The code calculates how many weeks each phase gets as a percentage of total weeks (`35% / 35% / 20% / 10%`), then adjusts for the edge case where the timeline is very short.
+
+**Cutback weeks** appear every 4th week in Base and Build. They reduce that week's mileage to 80% of the target. This is standard training practice — the body needs periodic recovery to absorb the stress of the preceding weeks.
+
+### Linear interpolation for mileage ramps
+
+Within each phase, mileage increases linearly from the start value to the end value. The code computes a `progress` ratio (`0.0` = first week of phase, `1.0` = last week) and uses it to interpolate:
+
+```js
+target = startMileage + (endMileage - startMileage) * progress;
+```
+
+This is called **linear interpolation** — a very common pattern for smoothly transitioning between two values over time. You'll see it everywhere in animation, audio, and simulation code.
+
+### Keyword parsing for injuries
+
+The injury input is free text, so the code can't know exactly what the user means. Instead, it scans the text for known keywords (`knee`, `shin`, `it band`, etc.) and maps each one to a set of workout types to avoid and a note to attach to affected days.
+
+Severity is assessed by counting how many keywords matched and looking for modifier words like "severe" or "chronic". This is a simple rule-based approach — not AI, not NLP — but it works well for a constrained domain where the vocabulary is predictable.
+
+### Why dates are stored as ISO strings
+
+JavaScript's `Date` object is notoriously tricky. One common bug: `new Date('2026-05-12')` creates a date in **UTC midnight**, which can display as May 11th in timezones west of UTC. To avoid this, all dates are parsed using a local-time constructor: `new Date(year, month - 1, day)`. They're then stored as `YYYY-MM-DD` strings using a manual formatter — not `toISOString()`, which would re-introduce the UTC issue.
+
+### The `isHistorical` flag
+
+Each row in the schedule has an `isHistorical` boolean. If the user entered a training start date before today, the app reconstructs what the plan would have looked like for those past weeks — using the original plan with no injury modifications. Marking them `isHistorical: true` lets the preview table and Excel exporter gray them out visually, making it clear they're already done.
+
+### Strength slot overflow
+
+The weekly schedule has 7 slots (Mon–Sun). If `runDays + strengthDays > 7`, there aren't enough rest days to fit everything separately. Rather than throwing an error, the code does a two-pass fill: first it places strength days on rest days, then if there are still strength days left it layers them onto run days, creating "Run + Strength" combo sessions. This degrades gracefully instead of crashing.
+
+---
+
+## 2026-05-12 (continued) — Mileage Fix, Pace Targets, Session Guidance
+
+### The unit mismatch bug
+
+The mileage tables (`PEAK_MILEAGE`, `PEAK_LONG_RUN`) were written in miles, but the user's `weeklyMileage` form input was passed in as-is — kilometers when the metric toggle was on. The easy-run formula subtracted a miles value from a km value and then multiplied the result by 1.609 to convert to km, compounding the error. The symptom: a 20km/week runner saw a ~10.5km easy run on day one.
+
+The fix: convert `weeklyMileage` to miles at the very top of `generateSchedule` using the selected unit flag, then work exclusively in miles throughout. The display function (`toDisplay`) already handled the conversion back to km for output.
+
+This is a classic example of why it's important to pick one internal unit and convert at the boundary (input + output), rather than letting values flow through in mixed units.
+
+### Evidence-based mileage tables
+
+The original peak mileage values were invented; they were too high and caused plans to ramp too fast. The revised tables are anchored to published plans: Hal Higdon Novice/Intermediate/Advanced and Nike Run Club. Key changes: peak long run for a 10K beginner dropped from 10 miles to 6, and peak weekly mileage from 25 to 21. These still scale up through intermediate and advanced, but start conservatively.
+
+### Pace as seconds-per-mile internally
+
+The optional "current time" field (e.g. "25:00 for 5K") is parsed into seconds, divided by the distance in miles, and stored internally as **seconds per mile**. All pace offsets (easy = race pace + N seconds, tempo = race pace + M seconds) are added in the same unit. The `formatPace` function converts to min/km or min/mi at display time.
+
+Working in a single numeric unit (seconds/mile) avoids the same class of bug as the mileage mismatch — you never subtract km values from mile values by accident.
+
+### Graceful degradation without pace input
+
+`getSessionGuidance` checks `racePaceSec != null` before producing pace ranges. When null (no reference time entered), it falls back to HR zone language and effort descriptions ("Zone 2 — fully conversational, 65–75% max HR"). The guidance is still useful; it's just expressed in relative terms rather than absolute pace. This pattern — provide specifics when you have them, fall back to qualitative guidance when you don't — is common in health and fitness apps.
+
+### Fitness level affecting workout prescriptions
+
+The same workout type (e.g. "Strength") produces different guidance depending on `fitnessStrength` level. A beginner gets bodyweight foundational work with high reps; an advanced athlete gets heavy compound lifts and plyometrics. This is implemented as a nested lookup table keyed by phase name then fitness level — simple, readable, and easy to update without touching any control flow.
+
+---
+
 ## Why One HTML File?
 
 Splitting into `index.html`, `styles.css`, and `app.js` is cleaner for larger projects. But for a small app that doesn't need a build process or a server, keeping everything in one file has real advantages: you can open it directly in a browser by double-clicking, share it as a single attachment, and there are no import paths to get wrong. The tradeoff is that the file gets longer — but for a project this size, that's fine.
