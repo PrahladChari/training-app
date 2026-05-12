@@ -136,6 +136,221 @@ The same workout type (e.g. "Strength") produces different guidance depending on
 
 ---
 
+## 2026-05-12 (continued) — Progressive Injury Rehabilitation
+
+### State that changes over time within a single output
+
+The injury notes feature was originally stateless — every row got the same note regardless of where it fell in the plan. The rehab model required making the note generation **time-aware**: the output for a given row now depends on which week of the forward plan it belongs to, not just what the injury is.
+
+The key design decision was adding a `weekNum` parameter to `getInjuryNote` rather than pre-computing all notes at the start. This keeps the function pure and testable — given the same inputs, it always returns the same output — while allowing the generator loop to control what it passes in.
+
+### Using a phase function as a router
+
+`getRehabPhase(weekNum, severity)` is a simple lookup — it takes two inputs and returns one of four string labels. That label is then used as a switch key in `getInjuryNote`. This pattern (compute a state label, then dispatch on it) is easier to reason about than embedding the boundary logic inside the function that uses it. If the phase boundaries ever change, you only touch one place.
+
+### Passing a modified context rather than adding flags
+
+`getWorkoutTypes` uses the injury profile to decide whether to substitute Cross-Training for long runs. In the loading and full rehab phases, that substitution should stop — but `getWorkoutTypes` has no concept of rehab phases. Rather than adding a parameter to it, the generator loop passes a clean `{ severity: 'none' }` profile as `effForTypes` while keeping the real profile for the note generation. This avoids adding logic to a function that doesn't need it, and preserves the separation between "what workout to assign" and "what note to attach."
+
+### Lookup tables for domain-specific content
+
+`REHAB_EXERCISES` is a plain JavaScript object — just string values keyed by injury keyword. The same keywords that `parseInjuries` extracts are used here as keys, so no extra parsing step is needed. When a user has multiple injuries (e.g. knee + IT band), the rehab note shows exercises for both, joined with a separator. This pattern — parse once, reuse the parsed result across multiple lookups — avoids duplicating the parsing logic.
+
+### Graceful re-entry as a design principle
+
+The progressive model naturally supports users who return to the platform mid-recovery. Because the schedule always starts from today and uses `weeksSinceInjury` counted from the first forward week, a user who re-submits with an updated injury description gets a correctly-phased plan from that moment onward, with completed weeks shown as historical. This wasn't explicitly built as a feature — it's a consequence of the "start from today" design decision made at the beginning.
+
+---
+
+## 2026-05-12 (continued) — Goal Pace, Ambition Flags, Pace Zone Research
+
+### Two paces, two purposes
+
+The app now tracks two distinct paces internally (both in sec/mile):
+- `racePaceSec` — derived from the user's **current** race time. Used for recovery runs and long runs, which should reflect where you actually are, not where you want to be.
+- `goalPaceSec` — derived from the user's **goal** race time. Used for tempo, intervals, and easy runs, which are calibrated to the effort level needed to achieve the goal.
+
+Keeping them separate avoids a subtle conceptual error: if you always train at current pace, you never push toward the goal. If you always train at goal pace, your recovery runs become too hard. The right pattern is to use goal pace for quality sessions and current pace for aerobic base work.
+
+### Jack Daniels' VDOT pace zones
+
+Daniels' system derives training zones from a single race result (VDOT = VO2max proxy). Each zone has a specific physiological purpose and a characteristic offset from race pace:
+
+| Zone | Physiological role | Typical offset from 10K race pace |
+|---|---|---|
+| Easy (E) | Aerobic base, recovery | +70–90 sec/km slower |
+| Threshold/Tempo (T) | Raise lactate threshold | +8–15 sec/km slower |
+| Interval (I) | Improve VO2max | −5–10 sec/km faster (≈ 5K effort) |
+| Repetition (R) | Running economy, speed | −15–25 sec/km faster |
+
+The key insight: Easy runs must be genuinely slow (most runners run them too fast). Intervals must be genuinely hard. Moderate "junk miles" at in-between intensity are the least productive use of training time.
+
+### 80/20 Running (Fitzgerald/Seiler)
+
+The polarized model says ~80% of weekly volume should be at low intensity (Zone 1–2, fully conversational) and ~20% at high intensity (threshold or above). Research on elite and recreational runners alike shows this distribution produces better adaptations than the moderate-heavy approach most recreational runners default to. The practical implication: if a runner feels like their easy days are "too easy," that's correct — the easy days exist to absorb the stress of the hard days, not to add more stimulus.
+
+### Warning banners for unrealistic goals
+
+When a goal time implies an improvement percentage that exceeds standard training adaptation rates, the app shows a styled warning banner before the schedule. The thresholds:
+- **>15% improvement**: flagged as unrealistic regardless of timeline
+- **>8% improvement**: flagged as very ambitious
+- **<8 weeks remaining with >5% gap**: timeline too short
+
+The suggested realistic alternative is always current time × 0.92 (8% improvement — the high end of what a focused training cycle typically delivers).
+
+### Improving the plan by bumping session variety
+
+If a user's goal requires >5% improvement, `qualityFitnessCardio` is set one level above their stated fitness level for the purpose of assigning workout types. This means a beginner with an ambitious goal will see interval sessions in the Build phase, which they otherwise wouldn't. The bump is narrow in scope — it doesn't affect mileage, long run distances, or any display labels, only which quality session types appear.
+
+---
+
+## 2026-05-13 — Building an AI-Powered Browser App with the Anthropic API
+
+### Making direct browser-to-API calls
+
+Calling AI APIs directly from a browser works for personal tools, but the mechanics differ by provider:
+
+- **Anthropic** requires `anthropic-dangerous-allow-browser: true` as an explicit header, and the API key goes in `x-api-key`. This is their opt-in gate for browser-side key exposure.
+- **Google Gemini** (REST via `generativelanguage.googleapis.com`) supports CORS from browsers natively — no special header needed. The API key goes in the query string: `?key=API_KEY`. This makes Gemini easier to call from browser-only apps.
+
+The two APIs also differ in request shape. Anthropic uses `system` + `messages[]` with `content` strings. Gemini uses `system_instruction.parts[]` + `contents[].parts[]` with `text` keys, and supports `generationConfig.response_mime_type: "application/json"` to force structured JSON output at the model level — cleaner than relying on prompt instructions alone. The response path also differs: Anthropic returns `content[0].text`; Gemini returns `candidates[0].content.parts[0].text`.
+
+### The API key exposure problem and the opt-in localStorage pattern
+
+An API key embedded in a browser page is visible to anyone who opens DevTools. For a personal-use tool, this is an acceptable tradeoff — the key is yours. For a shared or public tool, you'd need a backend proxy. The responsible pattern for personal tools:
+1. Accept the key at runtime via a form field (not hardcoded in source)
+2. Let the user opt in to persistence with a "Remember key" checkbox (`localStorage`)
+3. Never write it to the DOM in a way that makes it visible (use `type="password"`)
+
+This gives users full control: they can use the key ephemerally (cleared on refresh) or persistently (restored from `localStorage` on page load), with the choice explicitly theirs.
+
+### Structured JSON output from Claude
+
+When you need Claude to return machine-readable data, the most reliable approach is:
+1. In the system prompt: say "Return ONLY valid JSON" with an exact example of the structure
+2. In the parsing code: strip markdown code fences (```json ... ```) before `JSON.parse` — models occasionally wrap output in them despite instructions
+3. Wrap the parse in try/catch and fall back gracefully if the output is malformed
+
+The fallback is as important as the call itself. A broken API response should degrade gracefully, not crash the app.
+
+### Async form submit
+
+JavaScript form submit handlers are synchronous by default. To make one async (for an API call), just add `async` to the function keyword: `addEventListener('submit', async function(e) { ... })`. The `e.preventDefault()` still works synchronously — the form won't submit. You can then `await` inside the handler like any other async function. Disabling the submit button during the await prevents double-submits.
+
+---
+
+## 2026-05-13 — AI Injury Assessment via Anthropic API
+
+### Why keyword matching fails for severity
+
+Keyword matching treats every mention of "knee" the same regardless of context. "Slight knee soreness after a hard race" and "dislocated knee" both match the `knee` keyword and historically both produced `moderate` severity. The fundamental problem: severity isn't about which body part is mentioned — it's about the nature and acuity of the problem. Only a language model can make that distinction reliably from free text.
+
+### Direct browser → Anthropic API calls
+
+The app has no backend, so API calls happen client-side. Anthropic supports this with the `anthropic-dangerous-allow-browser: true` header, which must be sent alongside the API key. Without it, the request is rejected. This is intentional — Anthropic wants developers to explicitly opt in to browser-side key exposure (the key lives in a JS variable, visible to anyone with devtools access to the page).
+
+### Keeping async I/O outside synchronous functions
+
+`generateSchedule` is a pure synchronous function — it takes inputs, computes, returns. The async API call happens in the form submit handler (`async function`) before `generateSchedule` is called. The resolved `injuryProfile` is then passed in as `inputs.injuryProfile`. This pattern — resolve all I/O first, then call the synchronous core — keeps `generateSchedule` testable and composable without making its internals async.
+
+### Graceful degradation for optional features
+
+`resolveInjuryProfile` wraps the API call in a try/catch and falls back to the original keyword matching on any error (network failure, bad API key, invalid JSON response, quota exceeded). The user always gets a plan — just with less intelligent severity assessment. This is the right pattern for optional enhancement features: the fallback must be genuinely useful, not just an error message.
+
+### Structured output from Claude
+
+The system prompt instructs Claude to return ONLY valid JSON with a fixed schema. Claude occasionally wraps JSON in markdown code fences (```json ... ```) despite instructions. The parser strips these with a regex before calling `JSON.parse`. If parsing still fails, the error is caught and falls back gracefully. This "try to parse, fall back on failure" pattern is more robust than attempting to detect and prevent all possible output formats.
+
+### Opt-in API key persistence
+
+The "Remember key" checkbox triggers `localStorage.setItem`. Without checking the box, the key lives only in the DOM input's value — it's gone on page refresh. This respects user intent: some users don't want credentials persisted to browser storage, even for personal tools. The restore on page load checks for the saved key and pre-fills the field, with the checkbox checked so the user knows it's saved.
+
+---
+
 ## Why One HTML File?
 
 Splitting into `index.html`, `styles.css`, and `app.js` is cleaner for larger projects. But for a small app that doesn't need a build process or a server, keeping everything in one file has real advantages: you can open it directly in a browser by double-clicking, share it as a single attachment, and there are no import paths to get wrong. The tradeoff is that the file gets longer — but for a project this size, that's fine.
+
+---
+
+## 2026-05-13 — Switching AI Providers Mid-Project
+
+### Why the switch from Anthropic to Gemini matters technically
+
+The two APIs look similar at a high level but differ in meaningful ways:
+
+| Detail | Anthropic | Google Gemini |
+|---|---|---|
+| Browser CORS | Requires `anthropic-dangerous-allow-browser: true` header | Native CORS support — no special header |
+| Auth | `x-api-key` header | `?key=API_KEY` query param |
+| System prompt | `system` top-level field | `system_instruction: { parts: [{ text }] }` |
+| Messages | `messages: [{ role, content }]` | `contents: [{ role, parts: [{ text }] }]` |
+| JSON output | Prompt instruction only | `generationConfig.response_mime_type: "application/json"` enforces it at API level |
+| Response path | `content[0].text` | `candidates[0].content.parts[0].text` |
+
+The Gemini `response_mime_type` setting is particularly useful — it guarantees the model returns parseable JSON without relying on prompt phrasing alone. The defensive markdown-fence stripping (`replace(/^```(?:json)?\s*/i, '')`) remains in place as a belt-and-suspenders measure.
+
+When switching AI providers in a browser app, the main risk is auth shape and CORS. Test with a minimal fetch call first before wiring it into the full app.
+
+---
+
+## 2026-05-13 — Evidence-Based Training Plan Benchmarks
+
+### Why arbitrary numbers break down
+
+Invented mileage caps feel reasonable until you compare them to published plans. A beginner half marathon runner doing a 15-mile long run sounds like a lot — and it is: Hal Higdon's Novice 1 half marathon plan peaks at 10 miles, which is already 77% of the race distance. Training instincts borrowed from marathon planning (where 20-mile long runs are standard) don't transfer to shorter distances.
+
+### The multiplier formula problem
+
+A formula like `peak_long_run = race_distance × multiplier` produces reasonable numbers at marathon distance (where a hard cap saves it) but breaks badly for shorter races. A 1.2× multiplier on a half marathon gives 15.7 miles — higher than what Higdon prescribes for *intermediate* runners. The formula ignores that the relationship between long run and race distance isn't linear: a 5K runner needs a long run that builds aerobic capacity, not one that scales with 5K distance.
+
+### The three-source hierarchy
+
+When evaluating training prescriptions, sources aren't equally authoritative for all runner types:
+
+- **Hal Higdon**: best reference for recreational beginners and intermediates — plans are explicitly designed for that population, and the week-by-week schedules are publicly available and verifiable
+- **Pfitzinger** (*Faster Road Racing*, *Advanced Marathoning*): best reference for serious amateurs and advanced runners — higher volume, more complex periodization, assumes a real aerobic base
+- **Jack Daniels** (*Running Formula*): best for understanding the physiology (VDOT, pace zones, time caps) — his plans are highly individualized and less prescriptive about fixed distances
+
+For a tool targeting recreational runners across all levels, Higdon's published schedules are the most reliable anchor. Pfitzinger fills in the advanced cells where Higdon's plans are less detailed.
+
+### Verifying numbers before using them
+
+Peak long run values should be verified against actual plan schedules, not just the book's summary pages. Higdon's Novice 1 half marathon long run truly does peak at 10 miles — that's Week 11 of a 12-week plan, one week before race day. Any generated plan that prescribes higher should be questioned.
+
+---
+
+## 2026-05-13 — The 10% Weekly Mileage Rule
+
+### What the rule is and why it exists
+
+The 10% rule (don't increase weekly mileage more than 10% per week) is one of the most widely cited injury-prevention principles in running. The reasoning: the musculoskeletal system — tendons, ligaments, bone — adapts more slowly than the cardiovascular system. A runner can feel aerobically ready to handle more volume before their connective tissue has caught up. The 10% rule caps the rate of load increase to give that slower-adapting tissue time to keep pace.
+
+### Pre-computing vs. enforcing inline
+
+The 10% cap could be enforced inside `calcWeeklyMileage`, but that function only knows about a single week — it has no memory of what came before. The cleaner approach: a pre-computation pass builds a `weekMileageArr` array before the main schedule loop, carrying forward a running reference. This pattern (compute first, then consume) keeps the loop itself simple and avoids threading state through a pure function.
+
+### Cutback weeks and the cap interaction
+
+A naive 10% cap applied every week creates a problem: after a cutback week (which intentionally drops volume to 80%), the next non-cutback week is capped at 10% above the reduced value. For a runner at 30 miles/week who drops to 24 for a cutback, the next week would be limited to 26.4 — far below where the progression was heading. The fix: skip updating the reference mileage on cutback weeks. The reference carries the pre-cutback value forward, so the progression resumes from where it was, not from the recovery dip.
+
+---
+
+## 2026-05-13 — Interval Session Variety by Phase
+
+### Why generic "Interval / Speed Work" isn't enough
+
+Labeling all interval sessions the same name loses meaningful variation that actually matters for training. An 800m repeat at 5K effort and a 1000m repeat at race pace are different physiological stimuli — the first targets VO2max, the second trains race-specific lactate clearance. Collapsing them into one label meant the schedule couldn't communicate the right effort cue or recovery interval.
+
+### The phase-specific logic
+
+Different interval structures suit different phases of training:
+
+- **Build phase**: longer, moderate-pace repeats at 5K effort (6 × 800m) build VO2max without over-stressing a runner who's still accumulating base volume.
+- **Peak phase**: two alternating structures targeting race-specific pace — shorter/more reps (8 × 600m) and slightly longer/fewer reps (5 × 1000m). Alternating week-to-week within the Peak phase varies the stimulus while keeping the goal pace constant.
+
+The alternation uses `phase.indexInPhase % 2`, which is zero-indexed from the first week of the Peak phase — so even-indexed weeks get 8 × 600m and odd-indexed get 5 × 1000m. This is deterministic and reproducible: the same inputs always produce the same interval sequence.
+
+### Matching labels across three functions
+
+The interval type name is now a precise string (`'Interval — 6 × 800m'`) rather than a category label. Three functions must stay in sync: `getWorkoutTypes` (assigns the label), `getDistLabel` (reads the label to return a formatted distance string), and `getSessionGuidance` (reads the label to return effort/recovery instructions). Each uses `dayType.toLowerCase().includes(...)` pattern matching, with a generic `'interval'` catch-all as a fallback. This keeps the coupling loose — adding a new interval type means adding one entry in each of the three functions, with the catch-all ensuring nothing breaks if the label doesn't match.
