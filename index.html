@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Training Planner</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+      color: #1a1a1a;
+      background: #f5f5f5;
+      padding: 40px 20px 80px;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: #666;
+      margin-bottom: 40px;
+      font-size: 14px;
+    }
+
+    .form-card {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 32px;
+      max-width: 680px;
+      margin: 0 auto;
+    }
+
+    .section-title {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #888;
+      margin-bottom: 20px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #e8e8e8;
+    }
+
+    .section + .section {
+      margin-top: 36px;
+    }
+
+    .field {
+      margin-bottom: 20px;
+    }
+
+    .field:last-child {
+      margin-bottom: 0;
+    }
+
+    label {
+      display: block;
+      font-weight: 500;
+      margin-bottom: 6px;
+      font-size: 14px;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: #888;
+      margin-top: 4px;
+    }
+
+    input[type="date"],
+    input[type="number"],
+    input[type="text"],
+    select,
+    textarea {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1px solid #d0d0d0;
+      border-radius: 5px;
+      font-size: 14px;
+      font-family: inherit;
+      color: #1a1a1a;
+      background: #fff;
+      transition: border-color 0.15s;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+
+    input[type="date"]:focus,
+    input[type="number"]:focus,
+    input[type="text"]:focus,
+    select:focus,
+    textarea:focus {
+      outline: none;
+      border-color: #3a7bfd;
+      box-shadow: 0 0 0 3px rgba(58, 123, 253, 0.1);
+    }
+
+    select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23888' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      padding-right: 32px;
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 90px;
+    }
+
+    input[type="number"] {
+      width: 120px;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .fitness-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 20px;
+    }
+
+    .radio-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .radio-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .radio-option input[type="radio"] {
+      width: 16px;
+      height: 16px;
+      accent-color: #3a7bfd;
+      cursor: pointer;
+    }
+
+    .optional-tag {
+      font-size: 11px;
+      font-weight: 400;
+      color: #aaa;
+      margin-left: 6px;
+    }
+
+    /* ── Units toggle ── */
+    .units-toggle-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 28px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid #e8e8e8;
+    }
+
+    .toggle-label {
+      font-size: 13px;
+      color: #666;
+      font-weight: 500;
+      user-select: none;
+    }
+
+    .toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 40px;
+      height: 22px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .toggle-switch input { display: none; }
+
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: #d0d0d0;
+      border-radius: 11px;
+      transition: background 0.2s;
+    }
+
+    .toggle-track::after {
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      background: #fff;
+      border-radius: 50%;
+      top: 3px;
+      left: 3px;
+      transition: transform 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+
+    .toggle-switch input:checked + .toggle-track { background: #3a7bfd; }
+    .toggle-switch input:checked + .toggle-track::after { transform: translateX(18px); }
+
+    /* ── Height ft/in row ── */
+    .height-ft-in {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .height-ft-in input[type="number"] { width: 74px; }
+
+    .height-ft-in .unit-text {
+      font-size: 13px;
+      color: #666;
+    }
+
+    @media (max-width: 540px) {
+      .two-col,
+      .fitness-grid {
+        grid-template-columns: 1fr;
+      }
+      .form-card {
+        padding: 24px 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div style="max-width: 680px; margin: 0 auto;">
+    <h1>Training Planner</h1>
+    <p class="subtitle">Fill out the form below to generate your week-by-week training schedule.</p>
+  </div>
+
+  <form class="form-card" id="plannerForm">
+
+    <!-- Units toggle -->
+    <div class="units-toggle-row">
+      <span class="toggle-label">Imperial</span>
+      <label class="toggle-switch">
+        <input type="checkbox" id="unitToggle" />
+        <span class="toggle-track"></span>
+      </label>
+      <span class="toggle-label">Metric</span>
+    </div>
+
+    <!-- Race -->
+    <div class="section">
+      <div class="section-title">Race</div>
+
+      <div class="two-col">
+        <div class="field">
+          <label for="raceDate">Race date</label>
+          <input type="date" id="raceDate" name="raceDate" required />
+        </div>
+
+        <div class="field">
+          <label for="raceDistance">Race distance</label>
+          <select id="raceDistance" name="raceDistance" required>
+            <option value="" disabled selected>Select distance</option>
+            <option value="5k">5K</option>
+            <option value="10k">10K</option>
+            <option value="half">Half Marathon</option>
+            <option value="full">Marathon</option>
+            <option value="custom">Custom</option>
+          </select>
+          <div id="customDistanceWrap" style="display: none; margin-top: 8px;">
+            <input type="text" id="customDistance" name="customDistance" placeholder="e.g. 50K, 100 miles, 15K" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Training Volume -->
+    <div class="section">
+      <div class="section-title">Training Volume</div>
+
+      <div class="two-col">
+        <div class="field">
+          <label for="weeklyMileage">Current weekly distance</label>
+          <input type="number" id="weeklyMileage" name="weeklyMileage" min="0" max="150" step="0.5" placeholder="e.g. 20" required />
+          <p class="hint" id="weeklyMileageHint">Miles per week</p>
+        </div>
+
+        <div class="field">
+          <label for="trainingStartDate">Training start date <span class="optional-tag">optional</span></label>
+          <input type="date" id="trainingStartDate" name="trainingStartDate" />
+          <p class="hint">If already mid-cycle; defaults to today</p>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="field">
+          <label for="runDays">Running days per week</label>
+          <input type="number" id="runDays" name="runDays" min="1" max="7" step="1" placeholder="e.g. 4" required />
+        </div>
+
+        <div class="field">
+          <label for="strengthDays">Strength days per week</label>
+          <input type="number" id="strengthDays" name="strengthDays" min="0" max="7" step="1" placeholder="e.g. 2" required />
+        </div>
+      </div>
+    </div>
+
+    <!-- Physical Stats -->
+    <div class="section">
+      <div class="section-title">Physical Stats</div>
+
+      <div class="two-col">
+        <div class="field">
+          <label for="weight" id="weightLabel">Weight (lbs)</label>
+          <input type="number" id="weight" name="weight" min="0" step="0.1" placeholder="e.g. 160" />
+        </div>
+
+        <div class="field">
+          <label>Height</label>
+
+          <!-- Imperial: ft + in -->
+          <div class="height-ft-in" id="heightFtIn">
+            <input type="number" id="heightFt" name="heightFt" min="0" max="9" step="1" placeholder="ft" />
+            <span class="unit-text">ft</span>
+            <input type="number" id="heightIn" name="heightIn" min="0" max="11" step="1" placeholder="in" />
+            <span class="unit-text">in</span>
+          </div>
+
+          <!-- Metric: cm -->
+          <div id="heightCmWrap" style="display: none;">
+            <input type="number" id="heightCm" name="heightCm" min="0" max="300" step="1" placeholder="e.g. 175" style="width: 120px;" />
+            <p class="hint">cm</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Fitness Level -->
+    <div class="section">
+      <div class="section-title">Fitness Level</div>
+
+      <div class="fitness-grid">
+        <div class="field">
+          <label>Cardio</label>
+          <div class="radio-group">
+            <label class="radio-option">
+              <input type="radio" name="fitnessCardio" value="beginner" required /> Beginner
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="fitnessCardio" value="intermediate" /> Intermediate
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="fitnessCardio" value="advanced" /> Advanced
+            </label>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Strength</label>
+          <div class="radio-group">
+            <label class="radio-option">
+              <input type="radio" name="fitnessStrength" value="beginner" required /> Beginner
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="fitnessStrength" value="intermediate" /> Intermediate
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="fitnessStrength" value="advanced" /> Advanced
+            </label>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Flexibility</label>
+          <div class="radio-group">
+            <label class="radio-option">
+              <input type="radio" name="fitnessFlexibility" value="beginner" required /> Beginner
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="fitnessFlexibility" value="intermediate" /> Intermediate
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="fitnessFlexibility" value="advanced" /> Advanced
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Health -->
+    <div class="section">
+      <div class="section-title">Health &amp; Limitations</div>
+
+      <div class="field">
+        <label for="injuries">Current injuries or physical limitations <span class="optional-tag">optional</span></label>
+        <textarea id="injuries" name="injuries" placeholder="e.g. mild left knee pain, tight IT band, avoiding high-impact activities for 2 weeks"></textarea>
+        <p class="hint">Be specific — this will affect the generated schedule.</p>
+      </div>
+    </div>
+
+  </form>
+
+  <script>
+    // ── Units toggle ──────────────────────────────────────────────
+    const unitToggle = document.getElementById('unitToggle');
+
+    function applyUnits() {
+      const metric = unitToggle.checked;
+
+      document.getElementById('weeklyMileageHint').textContent =
+        metric ? 'km per week' : 'Miles per week';
+
+      document.getElementById('weightLabel').textContent =
+        metric ? 'Weight (kg)' : 'Weight (lbs)';
+
+      const mileageInput = document.getElementById('weeklyMileage');
+      mileageInput.max = metric ? 240 : 150;
+
+      document.getElementById('heightFtIn').style.display  = metric ? 'none'  : 'flex';
+      document.getElementById('heightCmWrap').style.display = metric ? 'block' : 'none';
+    }
+
+    unitToggle.addEventListener('change', applyUnits);
+    applyUnits();
+
+    // ── Custom distance ───────────────────────────────────────────
+    const raceDistanceSelect = document.getElementById('raceDistance');
+    const customDistanceWrap = document.getElementById('customDistanceWrap');
+    const customDistanceInput = document.getElementById('customDistance');
+
+    raceDistanceSelect.addEventListener('change', function () {
+      const isCustom = this.value === 'custom';
+      customDistanceWrap.style.display = isCustom ? 'block' : 'none';
+      customDistanceInput.required = isCustom;
+    });
+  </script>
+
+</body>
+</html>
