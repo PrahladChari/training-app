@@ -1,0 +1,1416 @@
+﻿// ── Schedule Generation ───────────────────────────────────────
+
+const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+
+// Last entry in each array is always the long-run slot (Saturday)
+const RUN_SLOTS = {
+  1: [5],
+  2: [2, 5],
+  3: [0, 3, 5],
+  4: [0, 2, 4, 5],
+  5: [0, 1, 3, 5, 6],
+  6: [0, 1, 2, 4, 5, 6],
+  7: [0, 1, 2, 3, 4, 5, 6],
+};
+
+function addDays(date, n) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
+  return d;
+}
+
+function isoDate(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function parseLocalDate(str) {
+  if (!str) return null;
+  const [y, m, d] = str.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function getMonday(date) {
+  const d = new Date(date);
+  const dow = d.getDay();
+  d.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
+  return d;
+}
+
+// ── Injury Parsing ────────────────────────────────────────────
+const INJURY_KEYWORDS = {
+  'knee':            { avoid: ['interval', 'hill', 'speed'],          note: 'Avoid downhill running and lateral movements' },
+  'shin':            { avoid: ['interval', 'speed'],                   note: 'Prefer soft surfaces; reduce pace' },
+  'it band':         { avoid: ['hill', 'long run'],                    note: 'Add hip strengthening; avoid cambered roads' },
+  'hip':             { avoid: ['hill', 'tempo'],                       note: 'Reduce intensity; prioritise hip mobility' },
+  'back':            { avoid: ['heavy', 'lift'],                       note: 'Avoid loaded spinal compression; focus on core' },
+  'plantar':         { avoid: ['speed', 'hill'],                       note: 'Stretch calves and plantar fascia daily' },
+  'ankle':           { avoid: ['trail', 'uneven'],                     note: 'Stick to flat even surfaces' },
+  'hamstring':       { avoid: ['interval', 'speed', 'tempo'],          note: 'No explosive efforts; ease into every run' },
+  'calf':            { avoid: ['speed', 'hill'],                       note: 'Avoid uphills; reduce pace' },
+  'achilles':        { avoid: ['speed', 'hill', 'interval'],           note: 'Avoid steep inclines; no sprinting' },
+  'stress fracture': { avoid: ['run', 'impact'],                       note: 'No impact — cross-train only until medically cleared' },
+  'fracture':        { avoid: ['run', 'impact'],                       note: 'No impact — cross-train only until medically cleared' },
+};
+
+function parseInjuries(text) {
+  if (!text || !text.trim()) return { severity: 'none', modifications: [], keywords: [] };
+  const lower = text.toLowerCase();
+  const found = [], mods = [];
+  for (const [kw, mod] of Object.entries(INJURY_KEYWORDS)) {
+    if (lower.includes(kw)) { found.push(kw); mods.push(mod); }
+  }
+  const severeWords   = ['surgery','fracture','broken','torn',"can't run",'cannot run','unable to run','non-weight'];
+  const moderateWords = ['significant','limiting','chronic','persistent','multiple','severe'];
+  let severity = found.length > 0 ? 'mild' : 'none';
+  if (found.length >= 2 || moderateWords.some(w => lower.includes(w))) severity = 'moderate';
+  if (severeWords.some(w => lower.includes(w)))                         severity = 'severe';
+  return { severity, modifications: mods, keywords: found };
+}
+
+// ── Rehab Data & Phase Logic ──────────────────────────────────
+const REHAB_EXERCISES = {
+  'knee':      'Terminal knee extensions 3×15, wall sits 3×30 sec, straight leg raises 3×15',
+  'shin':      'Calf raises 3×15, toe taps 3×20, shin stretches 3×30 sec',
+  'it band':   'Foam roll IT band 2–3 min each side, hip abductions 3×15, banded lateral walks 3×15',
+  'hip':       'Clamshells 3×15, hip flexor stretches 3×30 sec, glute bridges 3×15',
+  'back':      'Cat-cow 3×10, bird dog 3×10 each side, dead bug 3×10 each side',
+  'hamstring': 'Slow eccentric leg curls 3×8, hip hinges with dowel 3×10',
+  'calf':      'Eccentric calf raises off step 3×15 (3 sec lower), calf stretches 3×30 sec',
+  'achilles':  'Eccentric heel drops off step 3×15, Achilles stretches 3×30 sec',
+  'plantar':   'Toe curls 3×15, towel scrunches, plantar fascia stretch 3×30 sec',
+  'ankle':     'Single-leg balance 3×30 sec, resistance band dorsiflexion 3×15',
+};
+
+// weekNum is 1-indexed from the first forward (non-historical) week
+function getRehabPhase(weekNum, severity) {
+  const bounds = {
+    mild:     { acute: 1, rehab: 2,  loading: 3  },
+    moderate: { acute: 2, rehab: 4,  loading: 8  },
+    severe:   { acute: 4, rehab: 8,  loading: 12 },
+  }[severity] || { acute: 2, rehab: 4, loading: 8 };
+
+  if (weekNum <= bounds.acute)   return 'acute';
+  if (weekNum <= bounds.rehab)   return 'rehab';
+  if (weekNum <= bounds.loading) return 'loading';
+  return 'full';
+}
+
+// ── Phases ────────────────────────────────────────────────────
+function calculatePhases(totalWeeks) {
+  if (totalWeeks <= 3) return { base: 0, build: 0, peak: 1, taper: Math.max(0, totalWeeks - 1) };
+  const taper = totalWeeks > 10
+    ? Math.max(2, Math.round(totalWeeks * 0.10))
+    : Math.max(1, Math.round(totalWeeks * 0.10));
+  const peak  = Math.max(1, Math.round(totalWeeks * 0.20));
+  const base  = Math.round(totalWeeks * 0.35);
+  const build = Math.max(1, totalWeeks - base - peak - taper);
+  return { base, build, peak, taper };
+}
+
+function getPhaseForWeek(weekIdx, phases) {
+  let i = weekIdx;
+  if (i < phases.base)  return { name: 'Base',  indexInPhase: i, totalInPhase: phases.base };
+  i -= phases.base;
+  if (i < phases.build) return { name: 'Build', indexInPhase: i, totalInPhase: phases.build };
+  i -= phases.build;
+  if (i < phases.peak)  return { name: 'Peak',  indexInPhase: i, totalInPhase: phases.peak };
+  i -= phases.peak;
+  return { name: 'Taper', indexInPhase: i, totalInPhase: phases.taper };
+}
+
+function isCutbackWeek(weekIdx, phases) {
+  const p = getPhaseForWeek(weekIdx, phases);
+  if (p.name === 'Peak' || p.name === 'Taper') return false;
+  return (p.indexInPhase + 1) % 4 === 0;
+}
+
+// ── Mileage Tables ────────────────────────────────────────────
+// Peak weekly mileage (miles) — based on Hal Higdon, Nike Run Club, standard plans
+const PEAK_MILEAGE = {
+  '5k':     { beginner: 16, intermediate: 25, advanced: 35 },
+  '10k':    { beginner: 21, intermediate: 30, advanced: 45 },
+  'half':   { beginner: 28, intermediate: 40, advanced: 55 },
+  'full':   { beginner: 40, intermediate: 55, advanced: 70 },
+  'custom': { beginner: 25, intermediate: 38, advanced: 55 },
+};
+
+// Peak long run distances (miles) — anchored to Hal Higdon (novice/intermediate),
+// Pfitzinger Faster Road Racing (advanced shorter distances),
+// and Pfitzinger Advanced Marathoning / Higdon Advanced (marathon).
+const PEAK_LONG_RUN = {
+  '5k':     { beginner: 5,  intermediate: 7,  advanced: 9  },
+  '10k':    { beginner: 6,  intermediate: 9,  advanced: 12 },
+  'half':   { beginner: 10, intermediate: 13, advanced: 15 },
+  'full':   { beginner: 20, intermediate: 20, advanced: 22 },
+  'custom': { beginner: 10, intermediate: 13, advanced: 15 },
+};
+
+function calcPeakLongRun(distance, fitnessCardio) {
+  return (PEAK_LONG_RUN[distance] || PEAK_LONG_RUN['half'])[fitnessCardio] || 10;
+}
+
+function getPeakMileage(distance, fitnessCardio) {
+  return (PEAK_MILEAGE[distance] || PEAK_MILEAGE['half'])[fitnessCardio] || 35;
+}
+
+function calcWeeklyMileage(weekIdx, phases, startMileage, peakMileage) {
+  const p = getPhaseForWeek(weekIdx, phases);
+  const prog = p.totalInPhase > 1 ? p.indexInPhase / (p.totalInPhase - 1) : 1;
+  const buildStart = Math.max(startMileage, peakMileage * 0.60);
+  let target;
+  switch (p.name) {
+    case 'Base':  target = startMileage + (buildStart - startMileage) * prog; break;
+    case 'Build': target = buildStart   + (peakMileage - buildStart)  * prog; break;
+    case 'Peak':  target = peakMileage  * (1 - 0.05 * prog);                  break;
+    case 'Taper': target = peakMileage  * (0.80 - 0.30 * prog);               break;
+    default:      target = startMileage;
+  }
+  if (isCutbackWeek(weekIdx, phases)) target *= 0.80;
+  return Math.max(startMileage * 0.75, Math.round(target * 2) / 2);
+}
+
+function calcLongRunDist(weekIdx, phases, distance, fitnessCardio) {
+  const p   = getPhaseForWeek(weekIdx, phases);
+  const max = calcPeakLongRun(distance, fitnessCardio);
+
+  if (p.name === 'Taper') {
+    const prog = p.totalInPhase > 1 ? p.indexInPhase / (p.totalInPhase - 1) : 1;
+    return Math.max(3, Math.round(max * (0.50 - 0.15 * prog) * 2) / 2);
+  }
+
+  // Base → Build → Peak: linear ramp from 60% (first week of Base) to 100% (last week of Peak)
+  const totalNonTaper = phases.base + phases.build + phases.peak;
+  const phaseOffset   = p.name === 'Base' ? 0
+    : p.name === 'Build' ? phases.base
+    : phases.base + phases.build;
+  const globalIdx  = phaseOffset + p.indexInPhase;
+  const globalProg = totalNonTaper > 1 ? globalIdx / (totalNonTaper - 1) : 1;
+  return Math.max(3, Math.round(max * (0.60 + 0.40 * globalProg) * 2) / 2);
+}
+
+// ── Pace Utilities ────────────────────────────────────────────
+const DIST_MILES = { '5k': 3.10686, '10k': 6.21371, 'half': 13.1094, 'full': 26.2188 };
+
+function parseTime(str) {
+  if (!str || !str.trim()) return null;
+  const parts = str.trim().split(':').map(Number);
+  if (parts.some(isNaN) || parts.length < 2 || parts.length > 3) return null;
+  return parts.length === 3
+    ? parts[0] * 3600 + parts[1] * 60 + parts[2]
+    : parts[0] * 60 + parts[1];
+}
+
+function getRacePaceSec(timeStr, distKey) {
+  const secs  = parseTime(timeStr);
+  const miles = DIST_MILES[distKey];
+  return (secs && miles) ? secs / miles : null; // seconds per mile
+}
+
+function formatPace(secPerMile, units) {
+  const s   = units === 'metric' ? secPerMile / 1.60934 : secPerMile;
+  const min = Math.floor(s / 60);
+  const sec = Math.round(s % 60);
+  return `${min}:${String(sec).padStart(2, '0')}${units === 'metric' ? '/km' : '/mi'}`;
+}
+
+function formatSeconds(totalSecs) {
+  totalSecs = Math.round(totalSecs);
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const s = totalSecs % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// ── Workout Types ─────────────────────────────────────────────
+function getWorkoutTypes(phase, fitnessCardio, numRunSlots, injuryProfile) {
+  const avoiding = kw => injuryProfile.modifications.some(m =>
+    m.avoid.some(a => kw.toLowerCase().includes(a.toLowerCase()))
+  );
+  const types = [];
+  for (let i = 0; i < numRunSlots - 1; i++) {
+    if (phase.name === 'Taper') {
+      types.push(i === 0 ? 'Recovery Run' : 'Easy Run');
+    } else if (i === 0 && phase.name !== 'Base' && fitnessCardio !== 'beginner' && !avoiding('tempo')) {
+      types.push('Tempo Run');
+    } else if (i === 0 && phase.name === 'Base' && fitnessCardio === 'advanced' && !avoiding('stride')) {
+      types.push('Easy Run w/ Strides');
+    } else if (i === 1 && phase.name === 'Build' && fitnessCardio !== 'beginner' && !avoiding('interval')) {
+      types.push('Interval — 6 × 800m');
+    } else if (i === 1 && phase.name === 'Peak' && fitnessCardio !== 'beginner' && !avoiding('interval')) {
+      types.push(phase.indexInPhase % 2 === 0 ? 'Interval — 8 × 600m' : 'Interval — 5 × 1000m');
+    } else {
+      types.push('Easy Run');
+    }
+  }
+  // Long run (last slot)
+  if (injuryProfile.severity === 'severe') {
+    types.push('Cross-Training (Long Effort)');
+  } else if (avoiding('long run')) {
+    types.push('Long Run (moderate effort — see notes)');
+  } else {
+    types.push('Long Run');
+  }
+  return types;
+}
+
+// ── Distance / Duration Labels ────────────────────────────────
+function getDistLabel(dayType, weeklyMiles, numRunSlots, longRunMiles, units, fitnessCardio, phaseName) {
+  const toDisplay = mi => {
+    const val = units === 'metric' ? Math.round(mi * 1.60934 * 2) / 2 : Math.round(mi * 2) / 2;
+    return `${val} ${units === 'metric' ? 'km' : 'mi'}`;
+  };
+  const dt = dayType.toLowerCase();
+  if (dt.includes('rest'))       return '—';
+  if (dt.includes('cross'))      return '45–60 min';
+  if (dt.includes('long run'))   return toDisplay(longRunMiles);
+  if (dt.includes('recovery'))   return toDisplay(Math.max(2, Math.round((weeklyMiles / numRunSlots) * 0.55 * 2) / 2));
+  if (dt.includes('tempo'))      return toDisplay(Math.max(2, Math.round((weeklyMiles / numRunSlots) * 0.75 * 2) / 2));
+  if (dt.includes('6 × 800m'))  return '6 × 800m w/ 90 s rest';
+  if (dt.includes('8 × 600m'))  return '8 × 600m w/ 90 s rest';
+  if (dt.includes('5 × 1000m')) return '5 × 1000m w/ 2 min rest';
+  if (dt.includes('interval'))  return '6 × 800m w/ 90 s rest';
+  // Easy / strides: use proportional formula in taper (long run drops 50% while weekly mileage
+  // drops only 20%, making the subtraction formula inflate easy runs to nonsensical values).
+  // Secondary safeguard: if subtraction formula would exceed the long run distance, use
+  // proportional formula instead — an easy run can never be longer than the long run.
+  const rawEasy = Math.max(2, Math.round(((weeklyMiles - longRunMiles) / Math.max(1, numRunSlots - 1)) * 2) / 2);
+  if (phaseName === 'Taper' || rawEasy > longRunMiles) {
+    return toDisplay(Math.max(2, Math.round((weeklyMiles / numRunSlots) * 0.65 * 2) / 2));
+  }
+  return toDisplay(rawEasy);
+}
+
+function getStrengthLabel() { return '45–60 min'; }
+
+// ── Injury Notes ──────────────────────────────────────────────
+function getInjuryNote(dayType, injuryProfile, weekNum) {
+  if (injuryProfile.severity === 'none') return '';
+
+  const phase = getRehabPhase(weekNum, injuryProfile.severity);
+  if (phase === 'full') return '';
+
+  const dt = dayType.toLowerCase();
+
+  if (phase === 'acute') {
+    const relevant = injuryProfile.modifications.filter(m =>
+      m.avoid.some(a => dt.includes(a.toLowerCase()))
+    );
+    const pool = relevant.length > 0 ? relevant : injuryProfile.modifications;
+    return [...new Set(pool.map(m => m.note))].join(' | ');
+  }
+
+  if (phase === 'rehab') {
+    const exercises = injuryProfile.rehabExercises
+      || injuryProfile.keywords.map(kw => REHAB_EXERCISES[kw]).filter(Boolean).join(' | ');
+    return exercises
+      ? `Rehab: ${exercises}`
+      : 'Perform prescribed rehab exercises — consult a physio for your specific protocol';
+  }
+
+  if (phase === 'loading') {
+    return 'Progressive loading — monitor for discomfort, stop if pain exceeds 3/10';
+  }
+
+  return '';
+}
+
+// ── Session Guidance ──────────────────────────────────────────
+// Pace offsets are in sec/mile (Daniels VDOT zones, relative to goal race pace):
+//   Easy:     +113 to +145 sec/mile (+70 to +90 sec/km)
+//   Tempo:     +13 to  +24 sec/mile  (+8 to +15 sec/km)
+//   Interval:  -16 to   -8 sec/mile  (-10 to  -5 sec/km)
+//   Recovery: +144 to +192 sec/mile (keyed to current fitness pace)
+//   Long run:  +97 to +145 sec/mile  (+60 to +90 sec/km)
+function getSessionGuidance(dayType, phaseName, fitnessCardio, fitnessStrength, racePaceSec, goalPaceSec, units) {
+  const dt = dayType.toLowerCase();
+  const qualityBase = goalPaceSec ?? racePaceSec;
+  const currentBase = racePaceSec ?? goalPaceSec;
+  const hasQuality  = qualityBase != null;
+  const hasCurrent  = currentBase != null;
+
+  const pr = (base, lo, hi) => `${formatPace(base + lo, units)}–${formatPace(base + hi, units)}`;
+
+  if (dt === 'rest') {
+    return 'Full rest. Prioritise sleep and nutrition. Light walking or gentle stretching is fine.';
+  }
+
+  if (dt.includes('cross')) {
+    return 'Low-impact aerobic work — cycling, swimming, elliptical, or rowing at easy conversational effort (Zone 1–2). Maintain fitness without stressing the injured area.';
+  }
+
+  if (dt.includes('recovery run')) {
+    const p = hasCurrent ? ` Target ${pr(currentBase, 144, 192)}.` : '';
+    return `Very easy — Zone 1 (60–65% max HR).${p} Purposely slower than your normal easy pace. Goal: flush fatigue, not build fitness.`;
+  }
+
+  if (dt.includes('easy run') && dt.includes('stride')) {
+    const p = hasQuality ? ` Easy portion: ${pr(qualityBase, 113, 145)}.` : '';
+    return `Easy aerobic run with strides.${p} In the final 10 min: 4–6 × 20 sec smooth accelerations near mile effort, with 60–90 sec walk/jog recovery between each. Stay relaxed — not a full sprint.`;
+  }
+
+  if (dt.includes('easy run')) {
+    const p = hasQuality ? ` Target ${pr(qualityBase, 113, 145)}.` : '';
+    const phaseNote = {
+      Base:  'Focus on building aerobic base — effort matters more than pace.',
+      Build: 'Keep truly easy on easy days to balance your quality sessions.',
+      Peak:  'Stay conservative — save your legs for quality sessions.',
+      Taper: 'Very easy — let your body absorb the training load.',
+    }[phaseName] || '';
+    return `Zone 2 effort — fully conversational, 65–75% max HR.${p} ${phaseNote}`;
+  }
+
+  if (dt.includes('tempo')) {
+    const p = hasQuality ? ` Target ${pr(qualityBase, 13, 24)}.` : '';
+    const dur = { Base: '15–20 min', Build: '20–30 min', Peak: '25–40 min' }[phaseName] || '20–30 min';
+    return `Comfortably hard — 82–88% max HR, short sentences only.${p} Warm up 10–15 min easy, hold steady tempo for ${dur}, cool down 10 min. If pace drops sharply, ease off rather than forcing it.`;
+  }
+
+  if (dt.includes('6 × 800m')) {
+    const p = hasQuality ? ` Target ${pr(qualityBase, -16, -8)} per rep.` : '';
+    return `6 × 800m at 5K effort — 90–95% max HR.${p} 90 sec recovery jog between reps. Warm up 10–15 min easy beforehand. Stop if form breaks down significantly.`;
+  }
+
+  if (dt.includes('8 × 600m')) {
+    const p = hasQuality ? ` Target ${pr(qualityBase, -16, -8)} per rep.` : '';
+    return `8 × 600m at race pace — 90–95% max HR.${p} 90 sec recovery jog between reps. Warm up 10–15 min easy beforehand. Focus on maintaining consistent splits.`;
+  }
+
+  if (dt.includes('5 × 1000m')) {
+    const p = hasQuality ? ` Target ${pr(qualityBase, -10, -5)} per rep.` : '';
+    return `5 × 1000m at race pace — 88–93% max HR.${p} 2 min recovery jog between reps. Warm up 10–15 min easy beforehand. Aim for even-effort splits across all reps.`;
+  }
+
+  if (dt.includes('interval')) {
+    const p = hasQuality ? ` Target ${pr(qualityBase, -16, -8)} per rep.` : '';
+    return `Intervals at 5K effort — 90–95% max HR.${p} 90 sec recovery jog between reps. Warm up 10–15 min easy beforehand.`;
+  }
+
+  if (dt.includes('long run')) {
+    const p = hasCurrent ? ` Target ${pr(currentBase, 97, 145)}.` : '';
+    const fuel = phaseName === 'Base'
+      ? 'No fueling needed if under 75 min. Hydrate every 20–25 min.'
+      : phaseName === 'Build'
+      ? 'Gel or chews every 40–45 min once over 75 min. Hydrate every 20 min.'
+      : 'Practice full race-day fueling — gel every 30–40 min, hydrate every 20 min.';
+    const effort = phaseName === 'Peak'
+      ? 'Start easy. Run the final 20–30 min at goal race effort if feeling strong.'
+      : 'Conversational effort throughout — builds fat-burning efficiency and mental durability.';
+    return `${effort}${p} ${fuel}`;
+  }
+
+  if (dt.includes('strength')) {
+    return '';
+  }
+
+  return '';
+}
+
+// ── AI Injury Assessment ──────────────────────────────────────
+async function assessInjurySeverity(injuryText, apiKey) {
+  const SYSTEM_PROMPT = `You are a sports medicine assistant evaluating a runner's self-reported injury or discomfort to generate conservative training plan modifications.
+
+Return ONLY valid JSON with exactly this structure — no markdown, no explanation, no wrapping text:
+{
+  "severityLevel": "none",
+  "injuryTypes": ["list of identified issues in plain language"],
+  "reasoning": "1-2 sentence explanation of your severity assessment",
+  "raceDateAdjustment": 0,
+  "avoidList": ["workout types to restrict, e.g. interval, hill, tempo, long run"],
+  "modifications": ["specific training modifications, e.g. Avoid downhill running"],
+  "rehabExercises": "specific exercises with sets and reps appropriate for the identified issues"
+}
+
+severityLevel rules:
+- "none"     : general fatigue, vague post-race tiredness, fully resolved symptoms. No training changes needed.
+- "mild"     : tightness, soreness, overuse symptoms WITHOUT structural concern, or user-expressed uncertainty ("maybe not an injury", "just soreness", "a bit tight", "from a race"). Needs monitoring and targeted exercises but doesn't significantly limit training.
+- "moderate" : clear pain during activity, limited range of motion, confirmed overuse injury, or persistent symptoms ("chronic", "limiting my running", "pain above 4/10"). Significant training modifications required.
+- "severe"   : acute trauma, dislocation, fracture, torn tissue, inability to weight-bear ("dislocated", "torn", "can't walk", "fracture", "surgery", "severe pain"). Medical clearance required before return to running.
+
+raceDateAdjustment (integer weeks):
+  none/mild  → 0
+  moderate   → 1 to 3 based on your judgment
+  severe     → 4 to 8 based on your judgment
+
+Key distinctions:
+- Soreness and tightness after a race = mild at most, often none
+- Language like "maybe", "not sure if it's an injury", "just" = lean toward none/mild
+- Structural terms (dislocation, fracture, torn, surgery) = always severe
+- If uncertain between two levels, choose the lower one
+- Always include a physio recommendation in reasoning for anything beyond mild soreness`;
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents: [{ role: 'user', parts: [{ text: injuryText }] }],
+        generationConfig: {
+          response_mime_type: 'application/json',
+          maxOutputTokens: 600,
+        },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(`API ${response.status}: ${err.error?.message || response.statusText}`);
+  }
+  const data    = await response.json();
+  const rawText = data.candidates[0].content.parts[0].text;
+  // Strip markdown code fences if the model wrapped the JSON anyway
+  const cleaned = rawText.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+  return JSON.parse(cleaned);
+}
+
+function mapClaudeResponse(parsed) {
+  return {
+    severity:           parsed.severityLevel || 'none',
+    modifications:      [{ avoid: parsed.avoidList || [], note: (parsed.modifications || []).join('. ') }],
+    keywords:           parsed.injuryTypes   || [],
+    rehabExercises:     parsed.rehabExercises || '',
+    raceDateAdjustment: typeof parsed.raceDateAdjustment === 'number' ? parsed.raceDateAdjustment : null,
+    reasoning:          parsed.reasoning     || '',
+    source:             'claude',
+  };
+}
+
+async function resolveInjuryProfile(injuryText, apiKey) {
+  if (!injuryText.trim()) return { severity: 'none', modifications: [], keywords: [] };
+  if (!apiKey.trim())     return parseInjuries(injuryText);
+  try {
+    const parsed = await assessInjurySeverity(injuryText, apiKey);
+    return mapClaudeResponse(parsed);
+  } catch (err) {
+    console.warn('Claude injury assessment failed — falling back to keyword matching:', err.message);
+    return parseInjuries(injuryText);
+  }
+}
+
+// ── Main Generator ────────────────────────────────────────────
+function generateSchedule(inputs) {
+  const { raceDate, raceDistance, customDistance, weeklyMileage,
+          trainingStartDate, runDays, strengthDays,
+          fitnessCardio, fitnessStrength, injuries, units,
+          currentTime, goalTime } = inputs;
+
+  // Always work internally in miles; display converts to km when metric
+  const startMileage  = units === 'metric' ? weeklyMileage / 1.60934 : weeklyMileage;
+  const currentSecs   = parseTime(currentTime);
+  const goalSecs      = parseTime(goalTime);
+  const distMiles     = DIST_MILES[raceDistance];
+  const racePaceSec   = (currentSecs && distMiles) ? currentSecs / distMiles : null;
+  const goalPaceSec   = (goalSecs    && distMiles) ? goalSecs    / distMiles : null;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayMonday = getMonday(today);
+  const startDate   = trainingStartDate ? getMonday(trainingStartDate) : todayMonday;
+  const raceDateObj = parseLocalDate(raceDate);
+
+  const injuryProfile = inputs.injuryProfile || parseInjuries(injuries);
+
+  const raceAdj      = new Date(raceDateObj);
+  const raceShiftDays = injuryProfile.raceDateAdjustment != null
+    ? injuryProfile.raceDateAdjustment * 7
+    : injuryProfile.severity === 'severe'   ? 28
+    : injuryProfile.severity === 'moderate' ? 14
+    : 0;
+  if (raceShiftDays > 0) raceAdj.setDate(raceAdj.getDate() + raceShiftDays);
+
+  const totalWeeks = Math.max(1, Math.round((raceAdj - startDate) / (7 * 86400000)));
+  const histWeeks  = Math.max(0, Math.round((todayMonday - startDate) / (7 * 86400000)));
+
+  let improvementPct  = null;
+  let ambitionWarning = null;
+  if (currentSecs && goalSecs && currentSecs > 0) {
+    improvementPct = (currentSecs - goalSecs) / currentSecs * 100;
+    const suggested = formatSeconds(Math.round(currentSecs * 0.92));
+    if (improvementPct > 15) {
+      ambitionWarning = { level: 'unrealistic', msg: `Your goal requires a ${improvementPct.toFixed(1)}% improvement in ${totalWeeks} weeks. Most runners achieve 3–8% per training cycle. Consider ${suggested} as a more realistic target, or extend your race date.` };
+    } else if (improvementPct > 8) {
+      ambitionWarning = { level: 'ambitious', msg: `Your goal requires a ${improvementPct.toFixed(1)}% improvement in ${totalWeeks} weeks. This is at the upper limit of what most training cycles deliver (3–8%). Consider ${suggested} as a stretch goal, or extending your race date.` };
+    } else if (totalWeeks < 8 && improvementPct > 5) {
+      ambitionWarning = { level: 'ambitious', msg: `Improvements above 5% typically require at least 8 weeks of training. With only ${totalWeeks} weeks remaining, ${suggested} may be more achievable.` };
+    } else if (improvementPct <= 0) {
+      ambitionWarning = { level: 'info', msg: `Your goal time is at or slower than your current performance. The plan will focus on maintaining and consolidating fitness.` };
+    }
+  }
+
+  const QUAL_UP = { beginner: 'intermediate', intermediate: 'advanced' };
+  const qualityFitnessCardio = (improvementPct > 5 && fitnessCardio !== 'advanced')
+    ? QUAL_UP[fitnessCardio]
+    : fitnessCardio;
+
+  const phases    = calculatePhases(totalWeeks);
+  const peakMiles = Math.max(startMileage, getPeakMileage(raceDistance, fitnessCardio));
+
+  // Pre-compute capped weekly mileage: non-cutback weeks may not increase >10% week-over-week
+  const weekMileageArr = new Array(totalWeeks);
+  let prevNonCutbackMiles = startMileage;
+  for (let w = 0; w < totalWeeks; w++) {
+    const raw     = calcWeeklyMileage(w, phases, startMileage, peakMiles);
+    const cutback = isCutbackWeek(w, phases);
+    weekMileageArr[w] = cutback ? raw : Math.min(raw, prevNonCutbackMiles * 1.10);
+    if (!cutback) prevNonCutbackMiles = weekMileageArr[w];
+  }
+
+  // Build weekly slot map (shared template, applied to every week)
+  const runSlots  = RUN_SLOTS[Math.min(7, Math.max(1, runDays))];
+  const slotTypes = Array.from({ length: 7 }, () => ({ run: false, strength: false }));
+  runSlots.forEach(i => { slotTypes[i].run = true; });
+  let sLeft = strengthDays;
+  for (let i = 0; i < 7 && sLeft > 0; i++) {
+    if (!slotTypes[i].run)                         { slotTypes[i].strength = true; sLeft--; }
+  }
+  for (let i = 0; i < 7 && sLeft > 0; i++) {
+    if (slotTypes[i].run && !slotTypes[i].strength){ slotTypes[i].strength = true; sLeft--; }
+  }
+
+  const schedule = [];
+
+  for (let w = 0; w < totalWeeks; w++) {
+    const weekStart        = addDays(startDate, w * 7);
+    const isHistorical     = w < histWeeks;
+    const eff              = isHistorical ? { severity: 'none', modifications: [], keywords: [] } : injuryProfile;
+    const weeksSinceInjury = isHistorical ? 0 : (w - histWeeks + 1);
+    const rehabPhase       = getRehabPhase(weeksSinceInjury, injuryProfile.severity);
+    // In loading/full phases, clear the injury profile for workout-type assignment
+    // so cross-training substitutions and long-run flags no longer apply
+    const effForTypes      = (rehabPhase === 'loading' || rehabPhase === 'full')
+      ? { severity: 'none', modifications: [], keywords: [] }
+      : eff;
+    const phase      = getPhaseForWeek(w, phases);
+    const weekMiles  = weekMileageArr[w];
+    const longMiles  = calcLongRunDist(w, phases, raceDistance, fitnessCardio);
+    const runTypes   = getWorkoutTypes(phase, qualityFitnessCardio, runSlots.length, effForTypes);
+    let runIdx = 0;
+
+    for (let d = 0; d < 7; d++) {
+      const slot = slotTypes[d];
+      const date = addDays(weekStart, d);
+      const parts = [], notes = [];
+
+      if (slot.run) {
+        const wt = runTypes[runIdx++] || 'Easy Run';
+        parts.push(wt);
+        const n = getInjuryNote(wt, eff, weeksSinceInjury);
+        if (n) notes.push(n);
+      }
+      if (slot.strength) {
+        parts.push('Strength');
+        const n = getInjuryNote('Strength', eff, weeksSinceInjury);
+        if (n) notes.push(n);
+      }
+      if (parts.length === 0) parts.push('Rest');
+
+      const dayType = parts.join(' + ');
+      const sessionGuidance = parts
+        .map(p => getSessionGuidance(p.trim(), phase.name, fitnessCardio, fitnessStrength, racePaceSec, goalPaceSec, units))
+        .filter(Boolean)
+        .join(' | ');
+      let distDur;
+      if (slot.run) {
+        distDur = getDistLabel(dayType, weekMiles, runSlots.length, longMiles, units, fitnessCardio, phase.name);
+      } else if (slot.strength) {
+        distDur = getStrengthLabel();
+      } else {
+        distDur = '—';
+      }
+
+      if (d === 0 && !isHistorical) {
+        const cutback = isCutbackWeek(w, phases) ? ' — Cutback Week' : '';
+        notes.unshift(`${phase.name} Phase${cutback}`);
+      }
+
+      schedule.push({
+        weekStartDate: isoDate(weekStart),
+        weekNumber:    w + 1,
+        date:          isoDate(date),
+        dayOfWeek:     DAYS[d],
+        dayType,
+        distanceDuration: distDur,
+        notes:          notes.join(' | '),
+        sessionGuidance,
+        isHistorical,
+        phase:          phase.name,
+      });
+    }
+  }
+
+  // Race day row
+  const raceDow = raceAdj.getDay();
+  schedule.push({
+    weekStartDate: isoDate(raceAdj),
+    weekNumber:    totalWeeks + 1,
+    date:          isoDate(raceAdj),
+    dayOfWeek:     DAYS[raceDow === 0 ? 6 : raceDow - 1],
+    dayType:       'RACE DAY',
+    distanceDuration: (() => {
+      const labels = { '5k':'5K','10k':'10K','half':'Half Marathon (13.1 mi)','full':'Marathon (26.2 mi)' };
+      return labels[raceDistance] || customDistance || 'Race';
+    })(),
+    notes: raceShiftDays > 0
+      ? `Race date shifted +${Math.round(raceShiftDays / 7)} week${raceShiftDays !== 7 ? 's' : ''} due to ${injuryProfile.keywords.join(', ') || injuryProfile.severity} injury`
+      : '',
+    isHistorical: false,
+    phase: 'Race',
+  });
+
+  return {
+    schedule,
+    meta: {
+      totalWeeks, histWeeks, phases, peakMiles,
+      injuryProfile,
+      raceDateOriginal: isoDate(raceDateObj),
+      raceDateAdjusted: isoDate(raceAdj),
+      units,
+      improvementPct,
+      ambitionWarning,
+    },
+  };
+}
+
+// ── Form Submit ───────────────────────────────────────────────
+document.getElementById('plannerForm').addEventListener('submit', async function (e) {
+  e.preventDefault();
+
+  const fd          = new FormData(this);
+  const apiKey      = (document.getElementById('anthropicKey').value || '').trim();
+  const rememberKey = document.getElementById('rememberKey').checked;
+
+  if (rememberKey && apiKey) {
+    localStorage.setItem('gemini_api_key', apiKey);
+  } else {
+    localStorage.removeItem('gemini_api_key');
+  }
+
+  const injuryText = fd.get('injuries') || '';
+  const submitBtn  = this.querySelector('.btn-generate');
+
+  if (apiKey && injuryText.trim()) {
+    submitBtn.disabled    = true;
+    submitBtn.textContent = 'Assessing injury...';
+  }
+
+  let injuryProfile;
+  try {
+    injuryProfile = await resolveInjuryProfile(injuryText, apiKey);
+  } finally {
+    submitBtn.disabled    = false;
+    submitBtn.textContent = 'Generate Training Plan';
+  }
+
+  const inputs = {
+    raceDate:           fd.get('raceDate'),
+    raceDistance:       fd.get('raceDistance'),
+    customDistance:     fd.get('customDistance') || '',
+    weeklyMileage:      parseFloat(fd.get('weeklyMileage'))  || 0,
+    trainingStartDate:  fd.get('trainingStartDate') ? parseLocalDate(fd.get('trainingStartDate')) : null,
+    runDays:            parseInt(fd.get('runDays'))      || 4,
+    strengthDays:       parseInt(fd.get('strengthDays')) || 0,
+    fitnessCardio:      fd.get('fitnessCardio')      || 'beginner',
+    fitnessStrength:    fd.get('fitnessStrength')    || 'beginner',
+    fitnessFlexibility: fd.get('fitnessFlexibility') || 'beginner',
+    injuries:           injuryText,
+    units:              document.getElementById('unitToggle').checked ? 'metric' : 'imperial',
+    currentTime:        fd.get('currentTime') || '',
+    goalTime:           fd.get('goalTime')    || '',
+    injuryProfile,
+  };
+
+  window._currentInputs   = inputs;
+  const result = generateSchedule(inputs);
+  window._currentSchedule = result;
+
+  const { totalWeeks, histWeeks, phases, raceDateOriginal, raceDateAdjusted, ambitionWarning } = result.meta;
+  let msg = `Plan generated: ${totalWeeks} weeks — Base ${phases.base} / Build ${phases.build} / Peak ${phases.peak} / Taper ${phases.taper}.`;
+  if (histWeeks > 0) msg += ` Includes ${histWeeks} historical week(s) shown grayed out.`;
+  if (injuryProfile.severity !== 'none') {
+    msg += ` Race date adjusted: ${raceDateOriginal} → ${raceDateAdjusted} (${injuryProfile.severity} injury).`;
+    if (injuryProfile.source === 'claude' && injuryProfile.reasoning) {
+      msg += ` Assessment: ${injuryProfile.reasoning}`;
+    }
+  }
+
+  const statusEl = document.getElementById('statusMsg');
+  statusEl.textContent = msg;
+  statusEl.style.display = 'block';
+
+  const warningEl = document.getElementById('warningBanner');
+  if (ambitionWarning) {
+    const prefix = { unrealistic: 'Unrealistic target:', ambitious: 'Ambitious target:', info: 'Note:' }[ambitionWarning.level] || '';
+    warningEl.className = `warning-banner warning-${ambitionWarning.level}`;
+    warningEl.innerHTML = `<strong>${prefix}</strong> ${ambitionWarning.msg}`;
+    warningEl.style.display = 'block';
+  } else {
+    warningEl.style.display = 'none';
+  }
+
+  renderPreview(result);
+  console.log('Schedule result:', result);
+});
+
+// ── Excel Export ──────────────────────────────────────────────
+async function exportToExcel() {
+  if (!window._currentSchedule) return;
+
+  const { schedule, meta } = window._currentSchedule;
+  const inputs = window._currentInputs || {};
+  const { totalWeeks, histWeeks, phases, peakMiles, injuryProfile,
+          raceDateOriginal, raceDateAdjusted, units, improvementPct } = meta;
+
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Training Planner';
+  workbook.created = new Date();
+
+  // ── Sheet 1: Training Plan ──────────────────────────────────
+  const planSheet = workbook.addWorksheet('Training Plan');
+
+  planSheet.columns = [
+    { key: 'week',     width: 6  },
+    { key: 'wkStart',  width: 14 },
+    { key: 'date',     width: 10 },
+    { key: 'day',      width: 6  },
+    { key: 'dayType',  width: 22 },
+    { key: 'distDur',  width: 18 },
+    { key: 'notes',    width: 42 },
+    { key: 'guidance', width: 62 },
+  ];
+
+  // Header row
+  const headerRow = planSheet.addRow([
+    'Week', 'Week Start', 'Date', 'Day', 'Day Type',
+    'Distance / Duration', 'Notes', 'Session Guidance',
+  ]);
+  headerRow.height = 22;
+  headerRow.eachCell(cell => {
+    cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2D3436' } };
+    cell.font      = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+    cell.alignment = { vertical: 'middle' };
+  });
+
+  // Freeze header
+  planSheet.views = [{ state: 'frozen', ySplit: 1 }];
+
+  // Today's Monday for current week highlight
+  const _today = new Date();
+  _today.setHours(0, 0, 0, 0);
+  const todayMondayIso = isoDate(getMonday(_today));
+
+  const FULL_DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  const XL_DAY   = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const fmtDate  = iso => {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  let lastPhase = null;
+
+  for (const row of schedule) {
+    // Phase divider row when entering a new forward-plan phase
+    if (!row.isHistorical && row.phase !== 'Race' && row.phase !== lastPhase) {
+      const divRow  = planSheet.addRow([`— ${row.phase.toUpperCase()} PHASE —`]);
+      planSheet.mergeCells(`A${divRow.number}:H${divRow.number}`);
+      divRow.height = 18;
+      const dc = divRow.getCell(1);
+      dc.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
+      dc.font      = { bold: true, color: { argb: 'FF444444' }, size: 10 };
+      dc.alignment = { horizontal: 'center', vertical: 'middle' };
+      lastPhase = row.phase;
+    }
+
+    const dataRow = planSheet.addRow([
+      row.dayType === 'RACE DAY' ? '' : row.weekNumber,
+      row.weekStartDate ? fmtDate(row.weekStartDate) : '',
+      fmtDate(row.date),
+      XL_DAY[FULL_DAYS.indexOf(row.dayOfWeek)] ?? row.dayOfWeek.slice(0, 3),
+      row.dayType,
+      row.distanceDuration,
+      row.notes        || '',
+      row.sessionGuidance || '',
+    ]);
+
+    // Choose row background
+    let bgArgb;
+    if (row.dayType === 'RACE DAY') {
+      bgArgb = 'FFCFE2FF';
+    } else if (row.isHistorical) {
+      bgArgb = 'FFF5F5F5';
+    } else if (row.weekStartDate === todayMondayIso) {
+      bgArgb = 'FFDBEAFE';
+    } else {
+      bgArgb = row.weekNumber % 2 === 0 ? 'FFFFFFFF' : 'FFF9F9F9';
+    }
+
+    const fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgArgb } };
+
+    dataRow.eachCell({ includeEmpty: true }, cell => {
+      cell.fill = fill;
+      if (row.dayType === 'RACE DAY') {
+        cell.font = { bold: true };
+      } else if (row.isHistorical) {
+        cell.font = { italic: true, color: { argb: 'FF999999' } };
+      }
+    });
+
+    // Wrap long text columns
+    dataRow.getCell(7).alignment = { wrapText: true, vertical: 'top' };
+    dataRow.getCell(8).alignment = { wrapText: true, vertical: 'top' };
+  }
+
+  // ── Sheet 2: Summary ────────────────────────────────────────
+  const sumSheet = workbook.addWorksheet('Summary');
+  sumSheet.columns = [{ width: 26 }, { width: 44 }];
+
+  const addTitle = text => {
+    sumSheet.addRow([]);
+    const r = sumSheet.addRow([text]);
+    sumSheet.mergeCells(`A${r.number}:B${r.number}`);
+    r.getCell(1).fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2D3436' } };
+    r.getCell(1).font      = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+    r.getCell(1).alignment = { vertical: 'middle' };
+    r.height = 20;
+  };
+
+  const addPair = (label, value) => {
+    const r = sumSheet.addRow([label, value != null && value !== '' ? String(value) : '—']);
+    r.getCell(1).font      = { bold: true, color: { argb: 'FF555555' } };
+    r.getCell(2).alignment = { wrapText: true };
+  };
+
+  const DIST_NAMES  = { '5k': '5K', '10k': '10K', 'half': 'Half Marathon', 'full': 'Marathon',
+                        'custom': inputs.customDistance || 'Custom' };
+  const unitLabel   = units === 'metric' ? 'km' : 'mi';
+  const peakDisplay = units === 'metric'
+    ? `${Math.round(peakMiles * 1.60934)} km/wk`
+    : `${peakMiles} mi/wk`;
+
+  addTitle('Race & Goal');
+  addPair('Race distance',   DIST_NAMES[inputs.raceDistance] || inputs.raceDistance || '—');
+  addPair('Race date',       raceDateOriginal);
+  if (raceDateOriginal !== raceDateAdjusted) {
+    addPair('Adjusted race date', `${raceDateAdjusted} — shifted due to injury`);
+  }
+  addPair('Current race time', inputs.currentTime || '—');
+  addPair('Goal race time',    inputs.goalTime    || '—');
+  if (improvementPct != null) {
+    addPair('Improvement required', `${improvementPct.toFixed(1)}%`);
+  }
+
+  addTitle('Plan Overview');
+  addPair('Training start',       inputs.trainingStartDate ? isoDate(inputs.trainingStartDate) : 'Today');
+  addPair('Total weeks',          totalWeeks);
+  addPair('Phase breakdown',      `Base ${phases.base} / Build ${phases.build} / Peak ${phases.peak} / Taper ${phases.taper}`);
+  addPair('Peak weekly mileage',  peakDisplay);
+  addPair('Running days / week',  inputs.runDays);
+  addPair('Strength days / week', inputs.strengthDays);
+
+  addTitle('Fitness Level');
+  addPair('Cardio',      inputs.fitnessCardio);
+  addPair('Strength',    inputs.fitnessStrength);
+  addPair('Flexibility', inputs.fitnessFlexibility);
+
+  addTitle('Injury Assessment');
+  if (injuryProfile && injuryProfile.severity !== 'none') {
+    addPair('Severity',          injuryProfile.severity);
+    addPair('Issues identified', (injuryProfile.keywords || []).join(', ') || '—');
+    addPair('Assessment method', injuryProfile.source === 'claude' ? 'AI (Gemini Flash)' : 'Keyword matching');
+    if (injuryProfile.reasoning) {
+      addPair('AI reasoning', injuryProfile.reasoning);
+    }
+    const noteText = (injuryProfile.modifications || []).map(m => m.note).filter(Boolean).join('; ');
+    if (noteText) addPair('Training modifications', noteText);
+  } else {
+    addPair('Status', 'No injuries reported — full plan applied');
+  }
+
+  // ── Trigger download ────────────────────────────────────────
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob   = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url    = URL.createObjectURL(blob);
+  const a      = document.createElement('a');
+  a.href       = url;
+  a.download   = 'training-plan.xlsx';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ── Preview Table ─────────────────────────────────────────────
+function displayDate(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+const DAY_ABBR = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+function renderPreview(result) {
+  const { schedule, meta } = result;
+  const tbody = document.getElementById('previewTbody');
+  tbody.innerHTML = '';
+
+  let lastWeekNum = null;
+
+  for (const row of schedule) {
+    const tr = document.createElement('tr');
+    const isFirstOfWeek = row.weekNumber !== lastWeekNum;
+
+    if (isFirstOfWeek)   tr.classList.add('week-first');
+    if (row.isHistorical) tr.classList.add('historical');
+    if (row.dayType === 'RACE DAY') tr.classList.add('race-day');
+
+    const dayIdx = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].indexOf(row.dayOfWeek);
+
+    const cells = [
+      { text: isFirstOfWeek ? String(row.weekNumber) : '' },
+      { text: isFirstOfWeek ? displayDate(row.weekStartDate) : '' },
+      { text: displayDate(row.date) },
+      { text: dayIdx >= 0 ? DAY_ABBR[dayIdx] : row.dayOfWeek },
+      { text: row.dayType },
+      { text: row.distanceDuration },
+      { text: row.notes, cls: 'notes-cell' },
+      { text: row.sessionGuidance || '', cls: 'guidance-cell' },
+    ];
+
+    cells.forEach(({ text, cls }) => {
+      const td = document.createElement('td');
+      td.textContent = text;
+      if (cls) td.className = cls;
+      tr.appendChild(td);
+    });
+
+    tbody.appendChild(tr);
+    lastWeekNum = row.weekNumber;
+  }
+
+  const { totalWeeks, histWeeks, peakMiles, units } = meta;
+  const unit = units === 'metric' ? 'km' : 'mi';
+  document.getElementById('previewMeta').textContent =
+    `${totalWeeks} weeks · Peak ${peakMiles} ${unit}/wk` +
+    (histWeeks > 0 ? ` · ${histWeeks} historical week${histWeeks > 1 ? 's' : ''} shown` : '');
+
+  document.getElementById('exportSection').style.display = 'block';
+
+  const section = document.getElementById('previewSection');
+  section.style.display = 'block';
+  section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── Units toggle ──────────────────────────────────────────────
+let _stravaWeeklyMiles = null; // miles fetched from Strava; null = not prefilled
+const unitToggle = document.getElementById('unitToggle');
+
+function applyUnits() {
+  const metric = unitToggle.checked;
+
+  document.getElementById('weeklyMileageHint').textContent =
+    metric ? 'km per week' : 'Miles per week';
+
+  document.getElementById('weightLabel').textContent =
+    metric ? 'Weight (kg)' : 'Weight (lbs)';
+
+  const mileageInput = document.getElementById('weeklyMileage');
+  mileageInput.max = metric ? 240 : 150;
+
+  document.getElementById('heightFtIn').style.display   = metric ? 'none'  : 'flex';
+  document.getElementById('heightCmWrap').style.display = metric ? 'block' : 'none';
+
+  // Re-derive Strava-prefilled mileage in the new unit
+  if (_stravaWeeklyMiles !== null) {
+    const converted = metric
+      ? Math.round(_stravaWeeklyMiles * 1.60934 * 10) / 10
+      : Math.round(_stravaWeeklyMiles * 10) / 10;
+    document.getElementById('weeklyMileage').value = converted;
+  }
+}
+
+unitToggle.addEventListener('change', applyUnits);
+applyUnits();
+
+// ── Custom distance ───────────────────────────────────────────
+const raceDistanceSelect = document.getElementById('raceDistance');
+const customDistanceWrap = document.getElementById('customDistanceWrap');
+const customDistanceInput = document.getElementById('customDistance');
+
+// ── API key restore ───────────────────────────────────────────
+(function () {
+  const saved = localStorage.getItem('gemini_api_key');
+  if (saved) {
+    document.getElementById('anthropicKey').value  = saved;
+    document.getElementById('rememberKey').checked = true;
+  }
+})();
+
+const RACE_DIST_LABELS = { '5k': '5K', '10k': '10K', 'half': 'Half Marathon', 'full': 'Marathon', 'custom': 'Race' };
+
+raceDistanceSelect.addEventListener('change', function () {
+  const isCustom = this.value === 'custom';
+  customDistanceWrap.style.display = isCustom ? 'block' : 'none';
+  customDistanceInput.required = isCustom;
+  const distLabel = RACE_DIST_LABELS[this.value] || 'Race';
+  document.getElementById('currentTimeDistLabel').textContent = `Current ${distLabel} time`;
+  document.getElementById('goalTimeDistLabel').textContent = `Goal ${distLabel} time`;
+});
+
+// ── Strava Integration ────────────────────────────────────────
+
+function stravaCredentials() {
+  return {
+    clientId:     localStorage.getItem('strava_client_id')     || '',
+    clientSecret: localStorage.getItem('strava_client_secret') || '',
+  };
+}
+
+function setDataSource(src) {
+  const isStrava  = src === 'strava';
+  const connected = !!localStorage.getItem('strava_access_token');
+  document.getElementById('srcManual').classList.toggle('src-active', !isStrava);
+  document.getElementById('srcManual').classList.remove('src-strava-active');
+  document.getElementById('srcStrava').classList.toggle('src-active',        isStrava && !connected);
+  document.getElementById('srcStrava').classList.toggle('src-strava-active', isStrava &&  connected);
+  document.getElementById('stravaPanel').classList.toggle('sp-visible', isStrava);
+  if (isStrava) renderStravaPanel();
+}
+
+function renderStravaPanel() {
+  const token = localStorage.getItem('strava_access_token');
+  const name  = localStorage.getItem('strava_athlete_name');
+  const panel = document.getElementById('stravaPanel');
+
+  if (token) {
+    panel.innerHTML = `
+      <div class="strava-connected-row">
+        <span class="strava-dot"></span>
+        <span class="strava-name">${escHtml(name || 'Athlete')}</span>
+        <button type="button" class="btn-strava-secondary" onclick="stravaFetchActivities()">Refresh from Strava</button>
+        <button type="button" class="btn-strava-disconnect" onclick="stravaDisconnect()">Disconnect</button>
+      </div>
+      <div class="strava-status" id="stravaStatus"></div>
+    `;
+  } else {
+    const { clientId, clientSecret } = stravaCredentials();
+    const isFile = window.location.protocol === 'file:';
+    const notice = isFile
+      ? `<p class="strava-notice">Strava OAuth requires a local HTTP server — open via <code>python -m http.server</code> or VS Code Live Server.</p>`
+      : '';
+    panel.innerHTML = `
+      <div style="margin-bottom:12px;">
+        <label style="display:block;font-size:13px;font-weight:500;margin-bottom:5px;color:#444;">Strava Client ID</label>
+        <input type="text" id="stravaClientId" value="${escHtml(clientId)}"
+               placeholder="Your numeric Client ID"
+               style="width:100%;padding:8px 10px;border:1px solid #d0d0d0;border-radius:5px;font-size:13px;" />
+      </div>
+      <div style="margin-bottom:16px;">
+        <label style="display:block;font-size:13px;font-weight:500;margin-bottom:5px;color:#444;">Strava Client Secret</label>
+        <input type="password" id="stravaClientSecret" value="${escHtml(clientSecret)}"
+               placeholder="Your Client Secret"
+               style="width:100%;padding:8px 10px;border:1px solid #d0d0d0;border-radius:5px;font-size:13px;font-family:monospace;" />
+        <p style="font-size:12px;color:#aaa;margin-top:5px;line-height:1.5;">
+          Stored in this browser only — never sent anywhere except Strava's token endpoint.
+          Find these at strava.com/settings/api under "My API Application".
+        </p>
+      </div>
+      <button type="button" class="btn-strava-connect" onclick="stravaConnect()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169"/></svg>
+        Connect with Strava
+      </button>
+      ${notice}
+      <div class="strava-status" id="stravaStatus"></div>
+    `;
+  }
+}
+
+function stravaSetStatus(msg, type) {
+  const el = document.getElementById('stravaStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.className   = 'strava-status' + (type ? ` ss-${type}` : '');
+}
+
+function stravaSetPrefill(field, show) {
+  const id = field === 'mileage' ? 'prefillBadgeMileage' : 'prefillBadgeTime';
+  const el = document.getElementById(id);
+  if (el) el.style.display = show ? 'inline-block' : 'none';
+}
+
+function stravaDisconnect() {
+  ['strava_access_token','strava_refresh_token','strava_expires_at','strava_athlete_name']
+    .forEach(k => localStorage.removeItem(k));
+  _stravaWeeklyMiles = null;
+  stravaSetPrefill('mileage', false);
+  stravaSetPrefill('time',    false);
+  setDataSource('strava');
+}
+
+function escHtml(str) {
+  return String(str).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+  );
+}
+
+// ── OAuth: initiate redirect ──────────────────────────────────
+function stravaConnect() {
+  const clientId     = (document.getElementById('stravaClientId')?.value     || '').trim();
+  const clientSecret = (document.getElementById('stravaClientSecret')?.value || '').trim();
+
+  if (!clientId || !clientSecret) {
+    stravaSetStatus('Enter your Client ID and Client Secret first.', 'error');
+    return;
+  }
+
+  localStorage.setItem('strava_client_id',     clientId);
+  localStorage.setItem('strava_client_secret', clientSecret);
+
+  // Save form state so the race distance survives the OAuth redirect
+  sessionStorage.setItem('strava_pre_auth_race_dist',
+    document.getElementById('raceDistance').value || '');
+
+  const redirectUri = window.location.origin + window.location.pathname;
+  const authUrl = 'https://www.strava.com/oauth/authorize'
+    + '?client_id='       + encodeURIComponent(clientId)
+    + '&redirect_uri='    + encodeURIComponent(redirectUri)
+    + '&response_type=code'
+    + '&scope=activity:read_all'
+    + '&approval_prompt=auto';
+
+  window.location.href = authUrl;
+}
+
+// ── OAuth: handle redirect-back callback ──────────────────────
+async function stravaHandleCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const code   = params.get('code');
+  const error  = params.get('error');
+
+  if (!code && !error) return false;
+
+  // Strip the OAuth params from the URL immediately so a refresh doesn't re-trigger
+  history.replaceState(null, '', window.location.pathname);
+
+  setDataSource('strava');
+
+  if (error) {
+    stravaSetStatus(`Authorization denied: ${error}`, 'error');
+    return true;
+  }
+
+  const { clientId, clientSecret } = stravaCredentials();
+  if (!clientId || !clientSecret) {
+    stravaSetStatus('Credentials missing — please re-enter your Client ID and Secret.', 'error');
+    return true;
+  }
+
+  stravaSetStatus('Exchanging authorization code with Strava…', 'loading');
+
+  try {
+    const resp = await fetch('https://www.strava.com/oauth/token', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        client_id:     clientId,
+        client_secret: clientSecret,
+        code,
+        grant_type:    'authorization_code',
+      }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.message || `HTTP ${resp.status}`);
+    }
+
+    const data    = await resp.json();
+    const athlete = data.athlete || {};
+    const name    = [athlete.firstname, athlete.lastname].filter(Boolean).join(' ') || 'Athlete';
+
+    localStorage.setItem('strava_access_token',  data.access_token);
+    localStorage.setItem('strava_refresh_token', data.refresh_token);
+    localStorage.setItem('strava_expires_at',    String(data.expires_at));
+    localStorage.setItem('strava_athlete_name',  name);
+
+    // Restore the race distance that was selected before the redirect
+    const savedDist = sessionStorage.getItem('strava_pre_auth_race_dist');
+    sessionStorage.removeItem('strava_pre_auth_race_dist');
+    if (savedDist) {
+      const el = document.getElementById('raceDistance');
+      el.value = savedDist;
+      el.dispatchEvent(new Event('change'));
+    }
+
+    setDataSource('strava');
+    stravaSetStatus(`Connected as ${name}. Fetching your recent activities…`, 'success');
+
+    await stravaFetchActivities();
+
+  } catch (err) {
+    stravaSetStatus(`Token exchange failed: ${err.message}`, 'error');
+  }
+
+  return true;
+}
+
+// ── Token refresh ─────────────────────────────────────────────
+async function stravaEnsureFreshToken() {
+  const expiresAt = parseInt(localStorage.getItem('strava_expires_at') || '0', 10);
+  const now       = Math.floor(Date.now() / 1000);
+
+  if (expiresAt - now > 300) return true; // valid for >5 more minutes
+
+  const { clientId, clientSecret } = stravaCredentials();
+  const refreshToken = localStorage.getItem('strava_refresh_token');
+
+  if (!clientId || !clientSecret || !refreshToken) return false;
+
+  stravaSetStatus('Refreshing Strava access token…', 'loading');
+
+  try {
+    const resp = await fetch('https://www.strava.com/oauth/token', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        client_id:     clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type:    'refresh_token',
+      }),
+    });
+
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+    const data = await resp.json();
+    localStorage.setItem('strava_access_token',  data.access_token);
+    localStorage.setItem('strava_refresh_token', data.refresh_token);
+    localStorage.setItem('strava_expires_at',    String(data.expires_at));
+    stravaSetStatus('', '');
+    return true;
+
+  } catch (err) {
+    stravaSetStatus(`Token refresh failed: ${err.message}. Try disconnecting and reconnecting.`, 'error');
+    return false;
+  }
+}
+
+// ── Activity fetch and field pre-fill ────────────────────────
+const STRAVA_RACE_WINDOWS = {
+  '5k':   [4000,   6000],
+  '10k':  [8000,  12400],
+  'half': [18000, 24000],
+  'full': [36000, 48000],
+};
+
+function findRaceTime(runs, raceDistance) {
+  const distWindow = STRAVA_RACE_WINDOWS[raceDistance];
+  if (!distWindow) return null; // custom distance or nothing selected
+
+  const [minM, maxM] = distWindow;
+  const candidates   = runs.filter(a => a.distance >= minM && a.distance <= maxM);
+  if (candidates.length === 0) return null;
+
+  // Prefer activities tagged as races (workout_type 1); fall back to any run
+  const races = candidates.filter(a => a.workout_type === 1);
+  const pool  = races.length > 0 ? races : candidates;
+
+  // Most recent first
+  pool.sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
+  return formatSeconds(pool[0].elapsed_time);
+}
+
+async function stravaFetchActivities() {
+  const token = localStorage.getItem('strava_access_token');
+  if (!token) {
+    stravaSetStatus('Not connected to Strava.', 'error');
+    return;
+  }
+
+  const ok = await stravaEnsureFreshToken();
+  if (!ok) return;
+
+  const freshToken   = localStorage.getItem('strava_access_token');
+  const fourWeeksAgo = Math.floor(Date.now() / 1000) - 28 * 24 * 3600;
+
+  stravaSetStatus('Fetching recent activities from Strava…', 'loading');
+
+  try {
+    const resp = await fetch(
+      `https://www.strava.com/api/v3/athlete/activities?after=${fourWeeksAgo}&per_page=100`,
+      { headers: { Authorization: `Bearer ${freshToken}` } }
+    );
+
+    if (resp.status === 401) {
+      stravaDisconnect();
+      stravaSetStatus('Session expired — please reconnect Strava.', 'error');
+      return;
+    }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+    const activities = await resp.json();
+    const runs       = activities.filter(a => a.type === 'Run' || a.sport_type === 'Run');
+
+    // ── Weekly mileage ──────────────────────────────────────
+    const totalMeters    = runs.reduce((sum, a) => sum + (a.distance || 0), 0);
+    const avgMetersPerWk = totalMeters / 4;
+    const weeklyMiles    = avgMetersPerWk / 1609.34;
+    _stravaWeeklyMiles   = weeklyMiles > 0 ? weeklyMiles : null;
+
+    const isMetric   = document.getElementById('unitToggle').checked;
+    const weeklyDist = weeklyMiles > 0
+      ? (isMetric
+          ? Math.round(weeklyMiles * 1.60934 * 10) / 10
+          : Math.round(weeklyMiles * 10) / 10)
+      : 0;
+
+    document.getElementById('weeklyMileage').value = weeklyDist > 0 ? weeklyDist : '';
+    stravaSetPrefill('mileage', weeklyDist > 0);
+
+    // ── Race time ───────────────────────────────────────────
+    const raceDistKey = document.getElementById('raceDistance').value;
+    const raceTime    = findRaceTime(runs, raceDistKey);
+
+    if (raceTime) {
+      document.getElementById('currentTime').value = raceTime;
+      stravaSetPrefill('time', true);
+    } else {
+      stravaSetPrefill('time', false);
+    }
+
+    // ── Status summary ──────────────────────────────────────
+    const unitLabel = isMetric ? 'km' : 'mi';
+    const distLabel = RACE_DIST_LABELS[raceDistKey] || '';
+    const runLine   = runs.length === 0
+      ? 'No runs found in the past 4 weeks.'
+      : `${runs.length} run${runs.length !== 1 ? 's' : ''} in the past 4 weeks.`;
+    const mileLine  = weeklyDist > 0 ? `Weekly avg: ${weeklyDist} ${unitLabel}.` : '';
+    const timeLine  = raceTime
+      ? `${distLabel} time: ${raceTime}.`
+      : raceDistKey && raceDistKey !== 'custom'
+        ? `No recent ${distLabel} found — race time left blank.`
+        : !raceDistKey
+          ? 'Select a race distance to pull your recent race time.'
+          : '';
+
+    stravaSetStatus(
+      [runLine, mileLine, timeLine].filter(Boolean).join(' '),
+      runs.length > 0 ? 'success' : ''
+    );
+
+  } catch (err) {
+    stravaSetStatus(`Error fetching activities: ${err.message}`, 'error');
+  }
+}
+
+// ── Load-time init ────────────────────────────────────────────
+(async function stravaOnLoad() {
+  const handled = await stravaHandleCallback();
+  if (handled) return;
+  if (localStorage.getItem('strava_access_token')) {
+    setDataSource('strava');
+  }
+})();
