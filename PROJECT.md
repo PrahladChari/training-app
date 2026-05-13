@@ -364,7 +364,58 @@ const taper = totalWeeks > 10
 
 ---
 
+---
+
+## Stage 9: Strava Integration
+
+### Data source toggle
+
+Added a "Data Source" segment control at the top of the form: "Manual Entry" (default) and "Connect to Strava". Selecting Strava reveals the Strava panel beneath it; switching back hides it. The active button is highlighted — orange for Strava (connected), default blue for Manual.
+
+### OAuth Authorization Code flow
+
+Strava uses OAuth 2.0 Authorization Code flow — the only option since implicit grant was deprecated. The flow:
+
+1. User enters their own Client ID and Client Secret (from strava.com/settings/api) into the Strava panel
+2. Credentials are saved to `localStorage` (`strava_client_id`, `strava_client_secret`) before redirect
+3. `stravaConnect()` saves `raceDistance` to `sessionStorage`, then redirects to Strava's auth URL with `scope=activity:read_all`
+4. Strava redirects back with `?code=` in the URL
+5. `stravaHandleCallback()` detects the code on page load, immediately cleans the URL via `history.replaceState`, exchanges the code for tokens via POST to `https://www.strava.com/oauth/token`, stores tokens and athlete name, restores `raceDistance` from `sessionStorage`, and auto-fetches activities
+
+The Authorization Callback URL in the Strava app settings must match the exact origin (e.g. `http://localhost:5500`). File:// URLs cannot be used as OAuth redirect URIs — the app shows a one-line notice when accessed via `file:` protocol.
+
+### Token storage and refresh
+
+localStorage keys: `strava_access_token`, `strava_refresh_token`, `strava_expires_at`, `strava_athlete_name`. Access tokens expire in 6 hours. `stravaEnsureFreshToken()` is called before every API request and silently exchanges the refresh token if the access token expires within 5 minutes.
+
+On 401 from the API, the app calls `stravaDisconnect()` (clears all `strava_*` keys) and shows a "reconnect" message.
+
+### Activity fetch and calculations
+
+`stravaFetchActivities()` fetches the past 4 weeks (`GET /api/v3/athlete/activities?after=<unix>&per_page=100`), filters to runs (`a.type === 'Run' || a.sport_type === 'Run'`), and computes:
+
+- **Weekly mileage**: total meters ÷ 4 ÷ 1609.34, stored internally in miles as `_stravaWeeklyMiles`
+- **Race time**: `findRaceTime()` uses `STRAVA_RACE_WINDOWS` (±20% distance windows keyed by race distance) to find candidates; prefers `workout_type === 1` (Strava race tag), falls back to any run, picks the most recent match; returns `null` if no match
+
+### Form pre-fill and unit conversion
+
+Fetched data populates `weeklyMileage` and `currentTime`. "Strava" prefill badges appear next to the pre-filled field labels. `_stravaWeeklyMiles` is stored in miles; `applyUnits()` re-derives the displayed value in the correct unit whenever the toggle changes, preventing double-conversion.
+
+### Critical declaration ordering (TDZ fix)
+
+`let _stravaWeeklyMiles = null` must be declared *before* the units toggle section, because `applyUnits()` references it and is called at page load — before the Strava section at the bottom of the script evaluates. Declaring it with `let` inside the Strava section causes a Temporal Dead Zone `ReferenceError` that silently kills all remaining script execution, including `stravaOnLoad()`.
+
+### Connected vs. disconnected panel states
+
+- **Disconnected**: Client ID input, Client Secret (password) input, "Connect with Strava" button, optional file:// notice
+- **Connected**: athlete name with a green dot, "Refresh from Strava" button, "Disconnect" button, status message area
+
+### Taper easy run bug fix
+
+`getDistLabel()` now uses a proportional formula (`weeklyMiles / numRunSlots × 0.65`) instead of `(weeklyMiles - longRunMiles) / (numRunSlots - 1)` when `phaseName === 'Taper'`. A secondary guard triggers the same formula if `rawEasy > longRunMiles` — easy run can never exceed the long run regardless of phase.
+
+---
+
 ## What Comes Next
 
-- Fix known bug: taper easy run on Week 12 Thursday showing incorrect distance (~16 km) — likely a long run distance not being correctly excluded from easy run mileage distribution
 - User testing and iterative refinements

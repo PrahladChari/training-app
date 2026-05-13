@@ -392,6 +392,161 @@
         padding: 24px 18px;
       }
     }
+
+    /* ── Strava integration ───────────────────────────────────── */
+    .data-source-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .source-btn {
+      flex: 1;
+      padding: 9px 14px;
+      border: 1.5px solid #d0d0d0;
+      border-radius: 6px;
+      background: #fff;
+      font-size: 13px;
+      font-weight: 500;
+      color: #666;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s, color 0.15s;
+      text-align: center;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+    }
+    .source-btn:hover { border-color: #aaa; color: #333; }
+    .source-btn.src-active {
+      border-color: #3a7bfd;
+      background: #f0f4ff;
+      color: #3a7bfd;
+      font-weight: 600;
+    }
+    .source-btn.src-strava-active {
+      border-color: #FC4C02;
+      background: #fff5f0;
+      color: #FC4C02;
+      font-weight: 600;
+    }
+
+    .strava-panel {
+      display: none;
+      margin-top: 8px;
+      border: 1px solid #ffd5c0;
+      border-radius: 8px;
+      padding: 18px 20px;
+      background: #fffaf7;
+    }
+    .strava-panel.sp-visible { display: block; }
+
+    .btn-strava-connect {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      background: #FC4C02;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+      letter-spacing: 0.01em;
+    }
+    .btn-strava-connect:hover    { background: #e04300; }
+    .btn-strava-connect:disabled { background: #ccc; cursor: default; }
+
+    .btn-strava-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 13px;
+      background: #fff;
+      color: #FC4C02;
+      border: 1.5px solid #FC4C02;
+      border-radius: 5px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .btn-strava-secondary:hover { background: #FC4C02; color: #fff; }
+
+    .strava-connected-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .strava-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #16a34a;
+      flex-shrink: 0;
+    }
+
+    .strava-name {
+      font-weight: 600;
+      color: #1a1a1a;
+      font-size: 14px;
+    }
+
+    .btn-strava-disconnect {
+      font-size: 12px;
+      color: #bbb;
+      background: none;
+      border: none;
+      cursor: pointer;
+      text-decoration: underline;
+      padding: 0;
+      margin-left: auto;
+    }
+    .btn-strava-disconnect:hover { color: #666; }
+
+    .strava-status {
+      font-size: 13px;
+      color: #888;
+      margin-top: 12px;
+      min-height: 18px;
+      line-height: 1.4;
+    }
+    .strava-status.ss-loading { color: #3a7bfd; }
+    .strava-status.ss-success { color: #16a34a; }
+    .strava-status.ss-error   { color: #dc2626; }
+
+    .strava-notice {
+      font-size: 12px;
+      color: #aaa;
+      margin-top: 10px;
+      line-height: 1.5;
+    }
+    .strava-notice code {
+      font-family: monospace;
+      font-size: 11px;
+      background: #f0f0f0;
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
+
+    .prefilled-badge {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      color: #FC4C02;
+      background: #fff5f0;
+      border: 1px solid #ffccb3;
+      border-radius: 3px;
+      padding: 1px 5px;
+      margin-left: 6px;
+      letter-spacing: 0.05em;
+      vertical-align: middle;
+      text-transform: uppercase;
+    }
   </style>
 </head>
 <body>
@@ -411,6 +566,22 @@
         <span class="toggle-track"></span>
       </label>
       <span class="toggle-label">Metric</span>
+    </div>
+
+    <!-- Data source -->
+    <div style="margin-bottom: 28px; padding-bottom: 24px; border-bottom: 1px solid #e8e8e8;">
+      <div class="section-title" style="margin-bottom: 14px;">Data Source</div>
+      <div class="data-source-row">
+        <button type="button" class="source-btn src-active" id="srcManual" onclick="setDataSource('manual')">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          Manual Entry
+        </button>
+        <button type="button" class="source-btn" id="srcStrava" onclick="setDataSource('strava')">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169"/></svg>
+          Connect to Strava
+        </button>
+      </div>
+      <div class="strava-panel" id="stravaPanel"></div>
     </div>
 
     <!-- Race -->
@@ -441,7 +612,7 @@
 
       <div class="two-col" style="margin-top: 20px;">
         <div class="field">
-          <label for="currentTime"><span id="currentTimeDistLabel">Current race time</span> <span class="optional-tag">optional</span></label>
+          <label for="currentTime"><span id="currentTimeDistLabel">Current race time</span> <span class="optional-tag">optional</span><span class="prefilled-badge" id="prefillBadgeTime" style="display:none">Strava</span></label>
           <input type="text" id="currentTime" name="currentTime" placeholder="e.g. 25:00 or 1:05:30" />
           <p class="hint">A recent result at this distance</p>
         </div>
@@ -459,7 +630,7 @@
 
       <div class="two-col">
         <div class="field">
-          <label for="weeklyMileage">Current weekly distance</label>
+          <label for="weeklyMileage">Current weekly distance<span class="prefilled-badge" id="prefillBadgeMileage" style="display:none">Strava</span></label>
           <input type="number" id="weeklyMileage" name="weeklyMileage" min="0" max="150" step="0.5" placeholder="e.g. 20" required />
           <p class="hint" id="weeklyMileageHint">Miles per week</p>
         </div>
@@ -886,7 +1057,7 @@
     }
 
     // ── Distance / Duration Labels ────────────────────────────────
-    function getDistLabel(dayType, weeklyMiles, numRunSlots, longRunMiles, units, fitnessCardio) {
+    function getDistLabel(dayType, weeklyMiles, numRunSlots, longRunMiles, units, fitnessCardio, phaseName) {
       const toDisplay = mi => {
         const val = units === 'metric' ? Math.round(mi * 1.60934 * 2) / 2 : Math.round(mi * 2) / 2;
         return `${val} ${units === 'metric' ? 'km' : 'mi'}`;
@@ -901,9 +1072,15 @@
       if (dt.includes('8 × 600m'))  return '8 × 600m w/ 90 s rest';
       if (dt.includes('5 × 1000m')) return '5 × 1000m w/ 2 min rest';
       if (dt.includes('interval'))  return '6 × 800m w/ 90 s rest';
-      // Easy / strides
-      const easyMiles = Math.max(2, Math.round(((weeklyMiles - longRunMiles) / Math.max(1, numRunSlots - 1)) * 2) / 2);
-      return toDisplay(easyMiles);
+      // Easy / strides: use proportional formula in taper (long run drops 50% while weekly mileage
+      // drops only 20%, making the subtraction formula inflate easy runs to nonsensical values).
+      // Secondary safeguard: if subtraction formula would exceed the long run distance, use
+      // proportional formula instead — an easy run can never be longer than the long run.
+      const rawEasy = Math.max(2, Math.round(((weeklyMiles - longRunMiles) / Math.max(1, numRunSlots - 1)) * 2) / 2);
+      if (phaseName === 'Taper' || rawEasy > longRunMiles) {
+        return toDisplay(Math.max(2, Math.round((weeklyMiles / numRunSlots) * 0.65 * 2) / 2));
+      }
+      return toDisplay(rawEasy);
     }
 
     function getStrengthLabel() { return '45–60 min'; }
@@ -1239,7 +1416,7 @@ Key distinctions:
             .join(' | ');
           let distDur;
           if (slot.run) {
-            distDur = getDistLabel(dayType, weekMiles, runSlots.length, longMiles, units, fitnessCardio);
+            distDur = getDistLabel(dayType, weekMiles, runSlots.length, longMiles, units, fitnessCardio, phase.name);
           } else if (slot.strength) {
             distDur = getStrengthLabel();
           } else {
@@ -1627,6 +1804,7 @@ Key distinctions:
     }
 
     // ── Units toggle ──────────────────────────────────────────────
+    let _stravaWeeklyMiles = null; // miles fetched from Strava; null = not prefilled
     const unitToggle = document.getElementById('unitToggle');
 
     function applyUnits() {
@@ -1641,8 +1819,16 @@ Key distinctions:
       const mileageInput = document.getElementById('weeklyMileage');
       mileageInput.max = metric ? 240 : 150;
 
-      document.getElementById('heightFtIn').style.display  = metric ? 'none'  : 'flex';
+      document.getElementById('heightFtIn').style.display   = metric ? 'none'  : 'flex';
       document.getElementById('heightCmWrap').style.display = metric ? 'block' : 'none';
+
+      // Re-derive Strava-prefilled mileage in the new unit
+      if (_stravaWeeklyMiles !== null) {
+        const converted = metric
+          ? Math.round(_stravaWeeklyMiles * 1.60934 * 10) / 10
+          : Math.round(_stravaWeeklyMiles * 10) / 10;
+        document.getElementById('weeklyMileage').value = converted;
+      }
     }
 
     unitToggle.addEventListener('change', applyUnits);
@@ -1672,6 +1858,361 @@ Key distinctions:
       document.getElementById('currentTimeDistLabel').textContent = `Current ${distLabel} time`;
       document.getElementById('goalTimeDistLabel').textContent = `Goal ${distLabel} time`;
     });
+
+    // ── Strava Integration ────────────────────────────────────────
+
+    function stravaCredentials() {
+      return {
+        clientId:     localStorage.getItem('strava_client_id')     || '',
+        clientSecret: localStorage.getItem('strava_client_secret') || '',
+      };
+    }
+
+    function setDataSource(src) {
+      const isStrava  = src === 'strava';
+      const connected = !!localStorage.getItem('strava_access_token');
+      document.getElementById('srcManual').classList.toggle('src-active', !isStrava);
+      document.getElementById('srcManual').classList.remove('src-strava-active');
+      document.getElementById('srcStrava').classList.toggle('src-active',        isStrava && !connected);
+      document.getElementById('srcStrava').classList.toggle('src-strava-active', isStrava &&  connected);
+      document.getElementById('stravaPanel').classList.toggle('sp-visible', isStrava);
+      if (isStrava) renderStravaPanel();
+    }
+
+    function renderStravaPanel() {
+      const token = localStorage.getItem('strava_access_token');
+      const name  = localStorage.getItem('strava_athlete_name');
+      const panel = document.getElementById('stravaPanel');
+
+      if (token) {
+        panel.innerHTML = `
+          <div class="strava-connected-row">
+            <span class="strava-dot"></span>
+            <span class="strava-name">${escHtml(name || 'Athlete')}</span>
+            <button type="button" class="btn-strava-secondary" onclick="stravaFetchActivities()">Refresh from Strava</button>
+            <button type="button" class="btn-strava-disconnect" onclick="stravaDisconnect()">Disconnect</button>
+          </div>
+          <div class="strava-status" id="stravaStatus"></div>
+        `;
+      } else {
+        const { clientId, clientSecret } = stravaCredentials();
+        const isFile = window.location.protocol === 'file:';
+        const notice = isFile
+          ? `<p class="strava-notice">Strava OAuth requires a local HTTP server — open via <code>python -m http.server</code> or VS Code Live Server.</p>`
+          : '';
+        panel.innerHTML = `
+          <div style="margin-bottom:12px;">
+            <label style="display:block;font-size:13px;font-weight:500;margin-bottom:5px;color:#444;">Strava Client ID</label>
+            <input type="text" id="stravaClientId" value="${escHtml(clientId)}"
+                   placeholder="Your numeric Client ID"
+                   style="width:100%;padding:8px 10px;border:1px solid #d0d0d0;border-radius:5px;font-size:13px;" />
+          </div>
+          <div style="margin-bottom:16px;">
+            <label style="display:block;font-size:13px;font-weight:500;margin-bottom:5px;color:#444;">Strava Client Secret</label>
+            <input type="password" id="stravaClientSecret" value="${escHtml(clientSecret)}"
+                   placeholder="Your Client Secret"
+                   style="width:100%;padding:8px 10px;border:1px solid #d0d0d0;border-radius:5px;font-size:13px;font-family:monospace;" />
+            <p style="font-size:12px;color:#aaa;margin-top:5px;line-height:1.5;">
+              Stored in this browser only — never sent anywhere except Strava's token endpoint.
+              Find these at strava.com/settings/api under "My API Application".
+            </p>
+          </div>
+          <button type="button" class="btn-strava-connect" onclick="stravaConnect()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.598h4.172L10.463 0l-7 13.828h4.169"/></svg>
+            Connect with Strava
+          </button>
+          ${notice}
+          <div class="strava-status" id="stravaStatus"></div>
+        `;
+      }
+    }
+
+    function stravaSetStatus(msg, type) {
+      const el = document.getElementById('stravaStatus');
+      if (!el) return;
+      el.textContent = msg;
+      el.className   = 'strava-status' + (type ? ` ss-${type}` : '');
+    }
+
+    function stravaSetPrefill(field, show) {
+      const id = field === 'mileage' ? 'prefillBadgeMileage' : 'prefillBadgeTime';
+      const el = document.getElementById(id);
+      if (el) el.style.display = show ? 'inline-block' : 'none';
+    }
+
+    function stravaDisconnect() {
+      ['strava_access_token','strava_refresh_token','strava_expires_at','strava_athlete_name']
+        .forEach(k => localStorage.removeItem(k));
+      _stravaWeeklyMiles = null;
+      stravaSetPrefill('mileage', false);
+      stravaSetPrefill('time',    false);
+      setDataSource('strava');
+    }
+
+    function escHtml(str) {
+      return String(str).replace(/[&<>"']/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
+      );
+    }
+
+    // ── OAuth: initiate redirect ──────────────────────────────────
+    function stravaConnect() {
+      const clientId     = (document.getElementById('stravaClientId')?.value     || '').trim();
+      const clientSecret = (document.getElementById('stravaClientSecret')?.value || '').trim();
+
+      if (!clientId || !clientSecret) {
+        stravaSetStatus('Enter your Client ID and Client Secret first.', 'error');
+        return;
+      }
+
+      localStorage.setItem('strava_client_id',     clientId);
+      localStorage.setItem('strava_client_secret', clientSecret);
+
+      // Save form state so the race distance survives the OAuth redirect
+      sessionStorage.setItem('strava_pre_auth_race_dist',
+        document.getElementById('raceDistance').value || '');
+
+      const redirectUri = window.location.origin + window.location.pathname;
+      const authUrl = 'https://www.strava.com/oauth/authorize'
+        + '?client_id='       + encodeURIComponent(clientId)
+        + '&redirect_uri='    + encodeURIComponent(redirectUri)
+        + '&response_type=code'
+        + '&scope=activity:read_all'
+        + '&approval_prompt=auto';
+
+      window.location.href = authUrl;
+    }
+
+    // ── OAuth: handle redirect-back callback ──────────────────────
+    async function stravaHandleCallback() {
+      const params = new URLSearchParams(window.location.search);
+      const code   = params.get('code');
+      const error  = params.get('error');
+
+      if (!code && !error) return false;
+
+      // Strip the OAuth params from the URL immediately so a refresh doesn't re-trigger
+      history.replaceState(null, '', window.location.pathname);
+
+      setDataSource('strava');
+
+      if (error) {
+        stravaSetStatus(`Authorization denied: ${error}`, 'error');
+        return true;
+      }
+
+      const { clientId, clientSecret } = stravaCredentials();
+      if (!clientId || !clientSecret) {
+        stravaSetStatus('Credentials missing — please re-enter your Client ID and Secret.', 'error');
+        return true;
+      }
+
+      stravaSetStatus('Exchanging authorization code with Strava…', 'loading');
+
+      try {
+        const resp = await fetch('https://www.strava.com/oauth/token', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            client_id:     clientId,
+            client_secret: clientSecret,
+            code,
+            grant_type:    'authorization_code',
+          }),
+        });
+
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.message || `HTTP ${resp.status}`);
+        }
+
+        const data    = await resp.json();
+        const athlete = data.athlete || {};
+        const name    = [athlete.firstname, athlete.lastname].filter(Boolean).join(' ') || 'Athlete';
+
+        localStorage.setItem('strava_access_token',  data.access_token);
+        localStorage.setItem('strava_refresh_token', data.refresh_token);
+        localStorage.setItem('strava_expires_at',    String(data.expires_at));
+        localStorage.setItem('strava_athlete_name',  name);
+
+        // Restore the race distance that was selected before the redirect
+        const savedDist = sessionStorage.getItem('strava_pre_auth_race_dist');
+        sessionStorage.removeItem('strava_pre_auth_race_dist');
+        if (savedDist) {
+          const el = document.getElementById('raceDistance');
+          el.value = savedDist;
+          el.dispatchEvent(new Event('change'));
+        }
+
+        setDataSource('strava');
+        stravaSetStatus(`Connected as ${name}. Fetching your recent activities…`, 'success');
+
+        await stravaFetchActivities();
+
+      } catch (err) {
+        stravaSetStatus(`Token exchange failed: ${err.message}`, 'error');
+      }
+
+      return true;
+    }
+
+    // ── Token refresh ─────────────────────────────────────────────
+    async function stravaEnsureFreshToken() {
+      const expiresAt = parseInt(localStorage.getItem('strava_expires_at') || '0', 10);
+      const now       = Math.floor(Date.now() / 1000);
+
+      if (expiresAt - now > 300) return true; // valid for >5 more minutes
+
+      const { clientId, clientSecret } = stravaCredentials();
+      const refreshToken = localStorage.getItem('strava_refresh_token');
+
+      if (!clientId || !clientSecret || !refreshToken) return false;
+
+      stravaSetStatus('Refreshing Strava access token…', 'loading');
+
+      try {
+        const resp = await fetch('https://www.strava.com/oauth/token', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            client_id:     clientId,
+            client_secret: clientSecret,
+            refresh_token: refreshToken,
+            grant_type:    'refresh_token',
+          }),
+        });
+
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+        const data = await resp.json();
+        localStorage.setItem('strava_access_token',  data.access_token);
+        localStorage.setItem('strava_refresh_token', data.refresh_token);
+        localStorage.setItem('strava_expires_at',    String(data.expires_at));
+        stravaSetStatus('', '');
+        return true;
+
+      } catch (err) {
+        stravaSetStatus(`Token refresh failed: ${err.message}. Try disconnecting and reconnecting.`, 'error');
+        return false;
+      }
+    }
+
+    // ── Activity fetch and field pre-fill ────────────────────────
+    const STRAVA_RACE_WINDOWS = {
+      '5k':   [4000,   6000],
+      '10k':  [8000,  12400],
+      'half': [18000, 24000],
+      'full': [36000, 48000],
+    };
+
+    function findRaceTime(runs, raceDistance) {
+      const distWindow = STRAVA_RACE_WINDOWS[raceDistance];
+      if (!distWindow) return null; // custom distance or nothing selected
+
+      const [minM, maxM] = distWindow;
+      const candidates   = runs.filter(a => a.distance >= minM && a.distance <= maxM);
+      if (candidates.length === 0) return null;
+
+      // Prefer activities tagged as races (workout_type 1); fall back to any run
+      const races = candidates.filter(a => a.workout_type === 1);
+      const pool  = races.length > 0 ? races : candidates;
+
+      // Most recent first
+      pool.sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
+      return formatSeconds(pool[0].elapsed_time);
+    }
+
+    async function stravaFetchActivities() {
+      const token = localStorage.getItem('strava_access_token');
+      if (!token) {
+        stravaSetStatus('Not connected to Strava.', 'error');
+        return;
+      }
+
+      const ok = await stravaEnsureFreshToken();
+      if (!ok) return;
+
+      const freshToken   = localStorage.getItem('strava_access_token');
+      const fourWeeksAgo = Math.floor(Date.now() / 1000) - 28 * 24 * 3600;
+
+      stravaSetStatus('Fetching recent activities from Strava…', 'loading');
+
+      try {
+        const resp = await fetch(
+          `https://www.strava.com/api/v3/athlete/activities?after=${fourWeeksAgo}&per_page=100`,
+          { headers: { Authorization: `Bearer ${freshToken}` } }
+        );
+
+        if (resp.status === 401) {
+          stravaDisconnect();
+          stravaSetStatus('Session expired — please reconnect Strava.', 'error');
+          return;
+        }
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+        const activities = await resp.json();
+        const runs       = activities.filter(a => a.type === 'Run' || a.sport_type === 'Run');
+
+        // ── Weekly mileage ──────────────────────────────────────
+        const totalMeters    = runs.reduce((sum, a) => sum + (a.distance || 0), 0);
+        const avgMetersPerWk = totalMeters / 4;
+        const weeklyMiles    = avgMetersPerWk / 1609.34;
+        _stravaWeeklyMiles   = weeklyMiles > 0 ? weeklyMiles : null;
+
+        const isMetric   = document.getElementById('unitToggle').checked;
+        const weeklyDist = weeklyMiles > 0
+          ? (isMetric
+              ? Math.round(weeklyMiles * 1.60934 * 10) / 10
+              : Math.round(weeklyMiles * 10) / 10)
+          : 0;
+
+        document.getElementById('weeklyMileage').value = weeklyDist > 0 ? weeklyDist : '';
+        stravaSetPrefill('mileage', weeklyDist > 0);
+
+        // ── Race time ───────────────────────────────────────────
+        const raceDistKey = document.getElementById('raceDistance').value;
+        const raceTime    = findRaceTime(runs, raceDistKey);
+
+        if (raceTime) {
+          document.getElementById('currentTime').value = raceTime;
+          stravaSetPrefill('time', true);
+        } else {
+          stravaSetPrefill('time', false);
+        }
+
+        // ── Status summary ──────────────────────────────────────
+        const unitLabel = isMetric ? 'km' : 'mi';
+        const distLabel = RACE_DIST_LABELS[raceDistKey] || '';
+        const runLine   = runs.length === 0
+          ? 'No runs found in the past 4 weeks.'
+          : `${runs.length} run${runs.length !== 1 ? 's' : ''} in the past 4 weeks.`;
+        const mileLine  = weeklyDist > 0 ? `Weekly avg: ${weeklyDist} ${unitLabel}.` : '';
+        const timeLine  = raceTime
+          ? `${distLabel} time: ${raceTime}.`
+          : raceDistKey && raceDistKey !== 'custom'
+            ? `No recent ${distLabel} found — race time left blank.`
+            : !raceDistKey
+              ? 'Select a race distance to pull your recent race time.'
+              : '';
+
+        stravaSetStatus(
+          [runLine, mileLine, timeLine].filter(Boolean).join(' '),
+          runs.length > 0 ? 'success' : ''
+        );
+
+      } catch (err) {
+        stravaSetStatus(`Error fetching activities: ${err.message}`, 'error');
+      }
+    }
+
+    // ── Load-time init ────────────────────────────────────────────
+    (async function stravaOnLoad() {
+      const handled = await stravaHandleCallback();
+      if (handled) return;
+      if (localStorage.getItem('strava_access_token')) {
+        setDataSource('strava');
+      }
+    })();
   </script>
 
 </body>
