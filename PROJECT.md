@@ -416,6 +416,45 @@ Fetched data populates `weeklyMileage` and `currentTime`. "Strava" prefill badge
 
 ---
 
+---
+
+## Stage 10: Agent Skills Packaging
+
+### What changed
+
+The project was packaged as an Anthropic Agent Skill — a standard for making tools consumable by Claude and other agents with progressive disclosure of context.
+
+### Files created
+
+| File | Purpose |
+|---|---|
+| `SKILL.md` | Entry point — YAML frontmatter, architecture overview, data flow diagram, key inputs/outputs, cross-references to knowledge files |
+| `training-logic.md` | Phase structure, mileage progression, workout type assignment, taper rules |
+| `injury-protocols.md` | Severity classification, assessment methods, rehab phase progression, per-injury avoid lists and exercises |
+| `race-standards.md` | Race distance constants, pace zone definitions, goal validation thresholds, Strava matching windows, VDOT reference |
+
+### Knowledge files are now the source of truth
+
+These markdown files are authoritative — when a number or rule conflicts between a `.md` file and `app.js`, the markdown wins and the code is updated to match. This was enforced during authoring: the peak mileage attribution was corrected from "Pfitzinger" to "Hal Higdon + Nike Run Club" after cross-checking against the `PEAK_MILEAGE` comment in `app.js`.
+
+### app.js references knowledge files
+
+Every major logic block in `app.js` now has a `// See: <file>.md — <section>` comment linking it to the authoritative documentation. For example:
+
+```js
+// See: training-logic.md — Workout type assignment (§ 4)
+function getWorkoutTypes(...) { ... }
+
+// See: race-standards.md — Pace zone definitions (§ 2)
+function getSessionGuidance(...) { ... }
+```
+
+### Interval offsets corrected
+
+During documentation, Build 6×800m and Peak 8×600m interval offsets were found to be less aggressive than the intended spec (−10 to −5 sec/km in code vs. −15 to −20 sec/km intended per Daniels VDOT). The code was updated (`pr(qualityBase, -16, -8)` → `pr(qualityBase, -32, -24)` in sec/mile) to match. 5×1000m remained at −6 to −3 sec/km (controlled race-pace effort, not 5K sprint effort). `race-standards.md` documents both values and explains the distinction.
+
+---
+
 ## What Comes Next
 
 - User testing and iterative refinements

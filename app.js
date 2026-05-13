@@ -40,6 +40,7 @@ function getMonday(date) {
 }
 
 // ── Injury Parsing ────────────────────────────────────────────
+// See: injury-protocols.md — Keyword matching (§ 2)
 const INJURY_KEYWORDS = {
   'knee':            { avoid: ['interval', 'hill', 'speed'],          note: 'Avoid downhill running and lateral movements' },
   'shin':            { avoid: ['interval', 'speed'],                   note: 'Prefer soft surfaces; reduce pace' },
@@ -53,6 +54,18 @@ const INJURY_KEYWORDS = {
   'achilles':        { avoid: ['speed', 'hill', 'interval'],           note: 'Avoid steep inclines; no sprinting' },
   'stress fracture': { avoid: ['run', 'impact'],                       note: 'No impact — cross-train only until medically cleared' },
   'fracture':        { avoid: ['run', 'impact'],                       note: 'No impact — cross-train only until medically cleared' },
+  'piriformis':      { avoid: ['hill', 'speed', 'long run'],           note: 'Deep buttock pain may radiate down leg; avoid prolonged sitting between runs' },
+  'sciatic':         { avoid: ['hill', 'speed', 'long run'],           note: 'Deep buttock pain may radiate down leg; avoid prolonged sitting between runs' },
+  'groin':           { avoid: ['speed', 'interval', 'hill'],           note: 'Avoid explosive push-off and wide strides; no rapid direction changes' },
+  'adductor':        { avoid: ['speed', 'interval', 'hill'],           note: 'Avoid explosive push-off and wide strides; no rapid direction changes' },
+  'glute':           { avoid: ['hill', 'speed'],                       note: 'Outer hip or buttock pain; pelvic drop during running is a warning sign' },
+  'hip flexor':      { avoid: ['hill', 'speed', 'interval'],           note: 'Pain at front of hip when extending leg back or lifting knee; sensitive to volume spikes' },
+  'psoas':           { avoid: ['hill', 'speed', 'interval'],           note: 'Pain at front of hip when extending leg back or lifting knee; sensitive to volume spikes' },
+  'patellar':        { avoid: ['interval', 'speed', 'hill'],           note: 'Load-related pain just below the kneecap; distinct from patellofemoral (runner\'s knee)' },
+  'peroneal':        { avoid: ['trail', 'uneven', 'speed'],            note: 'Outer ankle or lateral lower leg pain; often follows ankle sprains' },
+  'neuroma':         { avoid: ['speed', 'interval'],                   note: 'Burning or tingling between 3rd and 4th toes; worse in narrow shoes or on hard surfaces' },
+  'sacroiliac':      { avoid: ['long run', 'hill', 'uneven'],          note: 'One-sided lower back or buttock pain; uneven surfaces and single-leg loading aggravate it' },
+  'si joint':        { avoid: ['long run', 'hill', 'uneven'],          note: 'One-sided lower back or buttock pain; uneven surfaces and single-leg loading aggravate it' },
 };
 
 function parseInjuries(text) {
@@ -71,6 +84,7 @@ function parseInjuries(text) {
 }
 
 // ── Rehab Data & Phase Logic ──────────────────────────────────
+// See: injury-protocols.md — Per-injury avoid lists and rehab exercises (§ 4)
 const REHAB_EXERCISES = {
   'knee':      'Terminal knee extensions 3×15, wall sits 3×30 sec, straight leg raises 3×15',
   'shin':      'Calf raises 3×15, toe taps 3×20, shin stretches 3×30 sec',
@@ -81,9 +95,22 @@ const REHAB_EXERCISES = {
   'calf':      'Eccentric calf raises off step 3×15 (3 sec lower), calf stretches 3×30 sec',
   'achilles':  'Eccentric heel drops off step 3×15, Achilles stretches 3×30 sec',
   'plantar':   'Toe curls 3×15, towel scrunches, plantar fascia stretch 3×30 sec',
-  'ankle':     'Single-leg balance 3×30 sec, resistance band dorsiflexion 3×15',
+  'ankle':      'Single-leg balance 3×30 sec, resistance band dorsiflexion 3×15',
+  'piriformis': 'Piriformis stretch 3×30 sec each side, hip internal/external rotations 3×15, glute bridges 3×15',
+  'sciatic':    'Piriformis stretch 3×30 sec each side, hip internal/external rotations 3×15, glute bridges 3×15',
+  'groin':      'Isometric adductor squeeze 3×15, standing adductor stretch 3×30 sec, resistance band side steps 3×15',
+  'adductor':   'Isometric adductor squeeze 3×15, standing adductor stretch 3×30 sec, resistance band side steps 3×15',
+  'glute':      'Clamshells 3×15, banded lateral walks 3×15, hip abductions 3×15, single-leg glute bridge 3×12',
+  'hip flexor': 'Hip flexor stretch 3×30 sec, reverse lunges 3×10, dead bug 3×10 each side',
+  'psoas':      'Hip flexor stretch 3×30 sec, reverse lunges 3×10, dead bug 3×10 each side',
+  'patellar':   'Eccentric single-leg squats off step 3×15 (3 sec lower), quad stretches 3×30 sec, isometric wall sit 3×45 sec',
+  'peroneal':   'Resistance band eversion 3×15, single-leg balance 3×30 sec, ankle circles 3×20',
+  'neuroma':    'Toe splay exercises 3×15, intrinsic foot strengthening, soft tissue massage to ball of foot',
+  'sacroiliac': 'Clamshells 3×15, glute bridges 3×12, bird dog 3×10 each side, supine knee-to-chest stretch 3×30 sec',
+  'si joint':   'Clamshells 3×15, glute bridges 3×12, bird dog 3×10 each side, supine knee-to-chest stretch 3×30 sec',
 };
 
+// See: injury-protocols.md — Rehab phase progression (§ 3)
 // weekNum is 1-indexed from the first forward (non-historical) week
 function getRehabPhase(weekNum, severity) {
   const bounds = {
@@ -99,6 +126,7 @@ function getRehabPhase(weekNum, severity) {
 }
 
 // ── Phases ────────────────────────────────────────────────────
+// See: training-logic.md — Phase structure (§ 1)
 function calculatePhases(totalWeeks) {
   if (totalWeeks <= 3) return { base: 0, build: 0, peak: 1, taper: Math.max(0, totalWeeks - 1) };
   const taper = totalWeeks > 10
@@ -128,6 +156,7 @@ function isCutbackWeek(weekIdx, phases) {
 }
 
 // ── Mileage Tables ────────────────────────────────────────────
+// See: training-logic.md — Weekly mileage progression and peak mileage tables (§ 2)
 // Peak weekly mileage (miles) — based on Hal Higdon, Nike Run Club, standard plans
 const PEAK_MILEAGE = {
   '5k':     { beginner: 16, intermediate: 25, advanced: 35 },
@@ -172,6 +201,7 @@ function calcWeeklyMileage(weekIdx, phases, startMileage, peakMileage) {
   return Math.max(startMileage * 0.75, Math.round(target * 2) / 2);
 }
 
+// See: training-logic.md — Long run distance (§ 3)
 function calcLongRunDist(weekIdx, phases, distance, fitnessCardio) {
   const p   = getPhaseForWeek(weekIdx, phases);
   const max = calcPeakLongRun(distance, fitnessCardio);
@@ -192,6 +222,7 @@ function calcLongRunDist(weekIdx, phases, distance, fitnessCardio) {
 }
 
 // ── Pace Utilities ────────────────────────────────────────────
+// See: race-standards.md — Race distance constants and pace zone definitions (§ 1–2)
 const DIST_MILES = { '5k': 3.10686, '10k': 6.21371, 'half': 13.1094, 'full': 26.2188 };
 
 function parseTime(str) {
@@ -226,6 +257,7 @@ function formatSeconds(totalSecs) {
 }
 
 // ── Workout Types ─────────────────────────────────────────────
+// See: training-logic.md — Workout type assignment (§ 4)
 function getWorkoutTypes(phase, fitnessCardio, numRunSlots, injuryProfile) {
   const avoiding = kw => injuryProfile.modifications.some(m =>
     m.avoid.some(a => kw.toLowerCase().includes(a.toLowerCase()))
@@ -287,6 +319,7 @@ function getDistLabel(dayType, weeklyMiles, numRunSlots, longRunMiles, units, fi
 function getStrengthLabel() { return '45–60 min'; }
 
 // ── Injury Notes ──────────────────────────────────────────────
+// See: injury-protocols.md — Rehab phase progression, what each phase produces (§ 3)
 function getInjuryNote(dayType, injuryProfile, weekNum) {
   if (injuryProfile.severity === 'none') return '';
 
@@ -319,12 +352,14 @@ function getInjuryNote(dayType, injuryProfile, weekNum) {
 }
 
 // ── Session Guidance ──────────────────────────────────────────
+// See: race-standards.md — Pace zone definitions (§ 2)
 // Pace offsets are in sec/mile (Daniels VDOT zones, relative to goal race pace):
-//   Easy:     +113 to +145 sec/mile (+70 to +90 sec/km)
-//   Tempo:     +13 to  +24 sec/mile  (+8 to +15 sec/km)
-//   Interval:  -16 to   -8 sec/mile  (-10 to  -5 sec/km)
-//   Recovery: +144 to +192 sec/mile (keyed to current fitness pace)
-//   Long run:  +97 to +145 sec/mile  (+60 to +90 sec/km)
+//   Easy:          +113 to +145 sec/mile (+70 to +90 sec/km)
+//   Tempo:          +13 to  +24 sec/mile  (+8 to +15 sec/km)
+//   Interval 800m:  -32 to  -24 sec/mile (-20 to -15 sec/km)  ← 5K effort, aggressive
+//   Interval 1000m: -10 to   -5 sec/mile  (-6 to  -3 sec/km)  ← race pace, controlled
+//   Recovery:      +144 to +192 sec/mile (keyed to current fitness pace)
+//   Long run:       +97 to +145 sec/mile  (+60 to +90 sec/km)
 function getSessionGuidance(dayType, phaseName, fitnessCardio, fitnessStrength, racePaceSec, goalPaceSec, units) {
   const dt = dayType.toLowerCase();
   const qualityBase = goalPaceSec ?? racePaceSec;
@@ -370,12 +405,12 @@ function getSessionGuidance(dayType, phaseName, fitnessCardio, fitnessStrength, 
   }
 
   if (dt.includes('6 × 800m')) {
-    const p = hasQuality ? ` Target ${pr(qualityBase, -16, -8)} per rep.` : '';
+    const p = hasQuality ? ` Target ${pr(qualityBase, -32, -24)} per rep.` : '';
     return `6 × 800m at 5K effort — 90–95% max HR.${p} 90 sec recovery jog between reps. Warm up 10–15 min easy beforehand. Stop if form breaks down significantly.`;
   }
 
   if (dt.includes('8 × 600m')) {
-    const p = hasQuality ? ` Target ${pr(qualityBase, -16, -8)} per rep.` : '';
+    const p = hasQuality ? ` Target ${pr(qualityBase, -32, -24)} per rep.` : '';
     return `8 × 600m at race pace — 90–95% max HR.${p} 90 sec recovery jog between reps. Warm up 10–15 min easy beforehand. Focus on maintaining consistent splits.`;
   }
 
@@ -385,7 +420,7 @@ function getSessionGuidance(dayType, phaseName, fitnessCardio, fitnessStrength, 
   }
 
   if (dt.includes('interval')) {
-    const p = hasQuality ? ` Target ${pr(qualityBase, -16, -8)} per rep.` : '';
+    const p = hasQuality ? ` Target ${pr(qualityBase, -32, -24)} per rep.` : '';
     return `Intervals at 5K effort — 90–95% max HR.${p} 90 sec recovery jog between reps. Warm up 10–15 min easy beforehand.`;
   }
 
@@ -410,6 +445,7 @@ function getSessionGuidance(dayType, phaseName, fitnessCardio, fitnessStrength, 
 }
 
 // ── AI Injury Assessment ──────────────────────────────────────
+// See: injury-protocols.md — Assessment methods, Gemini API (§ 2)
 async function assessInjurySeverity(injuryText, apiKey) {
   const SYSTEM_PROMPT = `You are a sports medicine assistant evaluating a runner's self-reported injury or discomfort to generate conservative training plan modifications.
 
@@ -527,6 +563,7 @@ function generateSchedule(inputs) {
   const totalWeeks = Math.max(1, Math.round((raceAdj - startDate) / (7 * 86400000)));
   const histWeeks  = Math.max(0, Math.round((todayMonday - startDate) / (7 * 86400000)));
 
+  // See: race-standards.md — Goal time validation (§ 4)
   let improvementPct  = null;
   let ambitionWarning = null;
   if (currentSecs && goalSecs && currentSecs > 0) {
@@ -1299,6 +1336,7 @@ async function stravaEnsureFreshToken() {
 }
 
 // ── Activity fetch and field pre-fill ────────────────────────
+// See: race-standards.md — Strava activity matching windows (§ 5)
 const STRAVA_RACE_WINDOWS = {
   '5k':   [4000,   6000],
   '10k':  [8000,  12400],
