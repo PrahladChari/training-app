@@ -513,6 +513,49 @@ On check-in submission:
 
 ---
 
+---
+
+## Stage 12: Multi-Plan System, Per-Session Check-Ins, and Excel Grouping
+
+### Two-tab layout
+
+The UI was restructured into two tabs: **Generate Plan** and **Track Progress**. The Track tab is locked (greyed out) until a plan is generated. Switching tabs is handled by `switchTab()`, which shows/hides `#panelGenerate` and `#panelTrack`.
+
+### Per-session check-in (replaces rating-based model)
+
+The check-in form was rebuilt from a single week-level rating to individual session rows. Each row tracks:
+- `completed` — checkbox
+- `actualDist` — optional free-text distance logged
+- `effort` — 1–5 star buttons ("Very Easy" … "Very Hard")
+- `sessionNotes` — optional per-session text
+
+Old check-ins in localStorage (format: `sessionsCompleted` array + `rating`) are transparently upgraded via `migrateCheckin(c)` on read. The check-in submission no longer regenerates the remaining plan — it saves data, refreshes week selector checkmarks, and re-renders the off-track banner and history sidebar.
+
+Off-track detection moved to `computeWeekAnalysis(checkin)` which returns `volumeRate`, `effortAvg`, and `offTrack`. A week is off-track if `volumeRate < 0.80` OR (`effortAvg < 2.0` AND quality sessions were in the plan).
+
+### Submit button disable logic
+
+The Submit Check-In button is disabled when no non-future sessions are checked. `updateSubmitButtonState()` queries `.checkin-session-cb:not([disabled])` and is called after every checkbox change and at the end of `renderCheckinForm()`.
+
+### Multi-plan archiving
+
+"Generate New Plan" button added to Track tab. On form submit, `archiveCurrentPlan()` runs first and saves only **completed weeks** (week 1 through `currentWeek`) to `training_archived_plans`. Discards future weeks of the old plan.
+
+Key fields stored per archived entry: `weeksCompleted`, `planStartDate`, `originalRaceDate`, `archivedAt`, `weeksOffTrack`, `schedule` (trimmed), `meta`, `originalInputs`.
+
+`getArchivedPlans()` / `saveArchivedPlans()` replace the old `getPlanHistory()` / `savePlanHistory()`. The new key is `training_archived_plans`; a one-time migration from `training_plan_history` runs on first access if the new key is absent.
+
+### Check-in history sidebar
+
+`renderCheckinHistory()` shows all check-ins from all plan versions, grouped by plan, collapsible. The current plan section starts expanded; archived plan sections start collapsed. Header shows plan version, start date, race date, and weeks completed.
+
+### Excel additions
+
+- **Session Feedback column** (col 9): per-session actual distance, effort rating, and notes — pulled by top-level `getSessionFeedback(allCheckins, planId, weekNum, dayOfWeek)`.
+- **Archived plan rows** use ExcelJS row grouping: `outlineLevel = 1`, `hidden = true`. Each archived block is preceded by a visible `archived-summary` row (blue tint).
+- `planSheet.properties.outlineProperties = { summaryBelow: false }` ensures the [+] expand button appears above the block, not below.
+- Summary sheet section renamed "Plan Transitions"; shows `weeksCompleted`, `planStartDate`, `originalRaceDate` per archived plan.
+
 ## What Comes Next
 
 - User testing and iterative refinements

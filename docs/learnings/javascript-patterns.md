@@ -223,3 +223,52 @@ Three things make a localStorage → database migration non-trivial in a trainin
 3. **Optimistic UI**: localStorage writes are synchronous and instant. A database write is async and can fail. The migration point is a good time to add loading states and error handling to the storage functions — but that cost is paid once at the boundary, not scattered through the feature code.
 
 The pattern to follow: keep the same four-function interface, make them `async`, handle errors at that layer, and add a `userId` field to the stored records when authentication is introduced.
+
+---
+
+## localStorage Key Migration Pattern *(2026-05-17)*
+
+When you rename a localStorage key (e.g. `training_plan_history` → `training_archived_plans`), a one-time migration in the read function prevents existing users from losing data silently:
+
+```js
+function getArchivedPlans() {
+  const raw = localStorage.getItem('training_archived_plans');
+  if (raw) return JSON.parse(raw);
+  const old = localStorage.getItem('training_plan_history');
+  if (!old) return [];
+  const migrated = JSON.parse(old).map(h => ({ /* normalize shape */ }));
+  saveArchivedPlans(migrated);   // write under new key
+  return migrated;
+}
+```
+
+The old key is left in place — it's harmless and avoids data loss if something goes wrong with the migration write. Migration runs once and then every subsequent read hits the new key. No special "migration flag" or version number is needed.
+
+---
+
+## Async Function Hoisting Pitfall
+
+A `function` declaration inside an `async function` is technically hoisted within that scope, but in practice this can produce confusing bugs — especially when the inner function is called before it's "reached" in the flow. Promote any helper that's called from multiple callsites to a top-level function declaration instead. The symptom of the bug: a named function inside `async exportToExcel` was not found at calltime and returned `undefined` silently.
+
+---
+
+## ExcelJS Row Grouping for Collapsible Sections
+
+ExcelJS supports Excel's native row outline/grouping, which lets users click [+] to expand hidden rows:
+
+```js
+// Must set summaryBelow: false so the [+] button appears ABOVE the group
+planSheet.properties.outlineProperties = { summaryBelow: false };
+
+// Visible summary row (level 0 — always shown)
+const sumRow = planSheet.addRow(['Plan v1 — 8 weeks completed']);
+
+// Detail rows (level 1 — hidden by default)
+detailRows.forEach(r => {
+  const row = planSheet.addRow([...]);
+  row.outlineLevel = 1;
+  row.hidden       = true;
+});
+```
+
+Key gotcha: `summaryBelow: false` must be set on `planSheet.properties.outlineProperties` *before* any rows are added, not after. If omitted, Excel places the [+] below the group, which is confusing when the summary row is at the top.

@@ -769,9 +769,11 @@ document.getElementById('plannerForm').addEventListener('submit', async function
     injuryProfile,
   };
 
+  archiveCurrentPlan();
   inputs._planId = String(Date.now());
   window._currentInputs   = inputs;
   const result = generateSchedule(inputs);
+  result.meta.planVersion = getArchivedPlans().length + 1;
   window._currentSchedule = result;
 
   // Persist plan and original inputs for check-in regeneration
@@ -807,6 +809,18 @@ document.getElementById('plannerForm').addEventListener('submit', async function
 });
 
 // ── Excel Export ──────────────────────────────────────────────
+function getSessionFeedback(allCheckins, planId, weekNum, dayOfWeek) {
+  const checkin = allCheckins.find(c => c.planId === planId && c.weekNumber === weekNum);
+  if (!checkin) return '';
+  const sess = checkin.sessions?.find(s => s.dayOfWeek === dayOfWeek);
+  if (!sess?.completed) return '';
+  const parts = [];
+  if (sess.actualDist)   parts.push(`Actual: ${sess.actualDist}`);
+  if (sess.effort)       parts.push(`Effort: ${sess.effort}/5`);
+  if (sess.sessionNotes) parts.push(sess.sessionNotes);
+  return parts.join(' · ');
+}
+
 async function exportToExcel() {
   if (!window._currentSchedule) return;
 
@@ -831,13 +845,14 @@ async function exportToExcel() {
     { key: 'dayType',  width: 22 },
     { key: 'distDur',  width: 18 },
     { key: 'notes',    width: 42 },
+    { key: 'feedback', width: 30 },
     { key: 'guidance', width: 62 },
   ];
 
   // Header row
   const headerRow = planSheet.addRow([
     'Week', 'Week Start', 'Date', 'Day', 'Status', 'Day Type',
-    'Distance / Duration', 'Notes', 'Session Guidance',
+    'Distance / Duration', 'Notes', 'Session Feedback', 'Session Guidance',
   ]);
   headerRow.height = 22;
   headerRow.eachCell(cell => {
@@ -848,6 +863,7 @@ async function exportToExcel() {
 
   // Freeze header
   planSheet.views = [{ state: 'frozen', ySplit: 1 }];
+  planSheet.properties.outlineProperties = { summaryBelow: false };
 
   // Today's Monday for current week highlight
   const _today = new Date();
@@ -861,13 +877,71 @@ async function exportToExcel() {
     return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
-  let lastPhase = null;
+  const xlHistory  = getArchivedPlans();
+  const xlCheckins = getCheckins();
+
+  // Flatten all plans into render items: archived-summary + detail rows, then current plan rows
+  const renderItems = [];
+
+  if (xlHistory.length > 0) {
+    for (const h of xlHistory) {
+      const v         = h.version;
+      const raceStr   = h.originalRaceDate ? ` · race ${h.originalRaceDate}` : (h.meta?.raceDateOriginal ? ` · race ${h.meta.raceDateOriginal}` : '');
+      const startStr  = h.planStartDate ? ` · started ${h.planStartDate}` : '';
+      const wkStr     = h.weeksCompleted ? `${h.weeksCompleted} weeks completed` : '';
+      renderItems.push({
+        type:  'archived-summary',
+        label: `Plan v${v}${startStr}${raceStr} — ${wkStr} · archived ${h.archivedAt}`,
+        planId: h.planId || h.meta?.planId || '',
+        weeksCompleted: h.weeksCompleted,
+      });
+      for (const row of h.schedule) {
+        renderItems.push({ type: 'row', row, planId: h.planId || h.meta?.planId || '', isArchivedPlan: true });
+      }
+    }
+    const curV    = meta.planVersion || (xlHistory.length + 1);
+    const curRace = meta.raceDateOriginal ? ` · race ${meta.raceDateOriginal}` : '';
+    renderItems.push({ type: 'plan-divider', label: `— Plan v${curV}${curRace} (current) —`, color: 'FFE8F5E9' });
+  }
 
   for (const row of schedule) {
-    // Phase divider row when entering a new forward-plan phase
-    if (!row.isHistorical && row.phase !== 'Race' && row.phase !== lastPhase) {
+    renderItems.push({ type: 'row', row, planId: meta.planId, isArchivedPlan: false });
+  }
+
+  let lastPhase = null;
+
+  for (const item of renderItems) {
+    if (item.type === 'archived-summary') {
+      // Visible summary row for the archived plan block (acts as the outline group header)
+      const sumRow = planSheet.addRow([item.label]);
+      planSheet.mergeCells(`A${sumRow.number}:J${sumRow.number}`);
+      sumRow.height = 22;
+      const sc = sumRow.getCell(1);
+      sc.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD6E4F7' } };
+      sc.font      = { bold: true, color: { argb: 'FF1A3A6B' }, size: 10 };
+      sc.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+      lastPhase    = null;
+      continue;
+    }
+
+    if (item.type === 'plan-divider') {
+      const divRow = planSheet.addRow([item.label]);
+      planSheet.mergeCells(`A${divRow.number}:J${divRow.number}`);
+      divRow.height = 20;
+      const dc = divRow.getCell(1);
+      dc.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: item.color } };
+      dc.font      = { bold: true, color: { argb: 'FF333333' }, size: 10 };
+      dc.alignment = { horizontal: 'center', vertical: 'middle' };
+      lastPhase    = null;
+      continue;
+    }
+
+    const { row, planId, isArchivedPlan } = item;
+
+    // Phase divider rows only for the current plan
+    if (!isArchivedPlan && !row.isHistorical && row.phase !== 'Race' && row.phase !== lastPhase) {
       const divRow  = planSheet.addRow([`— ${row.phase.toUpperCase()} PHASE —`]);
-      planSheet.mergeCells(`A${divRow.number}:I${divRow.number}`);
+      planSheet.mergeCells(`A${divRow.number}:J${divRow.number}`);
       divRow.height = 18;
       const dc = divRow.getCell(1);
       dc.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E0E0' } };
@@ -878,22 +952,32 @@ async function exportToExcel() {
 
     const xlStatus = row.checkinStatus === 'completed' ? '✓ Done'
       : row.checkinStatus === 'missed' ? '✗ Missed' : '';
+    const feedback = getSessionFeedback(xlCheckins, planId, row.weekNumber, row.dayOfWeek);
 
     const dataRow = planSheet.addRow([
       row.dayType === 'RACE DAY' ? '' : row.weekNumber,
       row.weekStartDate ? fmtDate(row.weekStartDate) : '',
-      fmtDate(row.date),
+      row.date ? fmtDate(row.date) : '',
       XL_DAY[FULL_DAYS.indexOf(row.dayOfWeek)] ?? row.dayOfWeek.slice(0, 3),
       xlStatus,
       row.dayType,
       row.distanceDuration,
-      row.notes        || '',
+      row.notes           || '',
+      feedback,
       row.sessionGuidance || '',
     ]);
 
+    // Collapse archived plan rows under the summary header
+    if (isArchivedPlan) {
+      dataRow.outlineLevel = 1;
+      dataRow.hidden       = true;
+    }
+
     // Choose row background
     let bgArgb;
-    if (row.dayType === 'RACE DAY') {
+    if (isArchivedPlan) {
+      bgArgb = 'FFEEEEEE';
+    } else if (row.dayType === 'RACE DAY') {
       bgArgb = 'FFCFE2FF';
     } else if (row.isHistorical) {
       bgArgb = 'FFF5F5F5';
@@ -907,7 +991,9 @@ async function exportToExcel() {
 
     dataRow.eachCell({ includeEmpty: true }, cell => {
       cell.fill = fill;
-      if (row.dayType === 'RACE DAY') {
+      if (isArchivedPlan) {
+        cell.font = { italic: true, color: { argb: 'FF777777' } };
+      } else if (row.dayType === 'RACE DAY') {
         cell.font = { bold: true };
       } else if (row.isHistorical) {
         cell.font = { italic: true, color: { argb: 'FF999999' } };
@@ -921,8 +1007,9 @@ async function exportToExcel() {
     }
 
     // Wrap long text columns
-    dataRow.getCell(8).alignment = { wrapText: true, vertical: 'top' };
-    dataRow.getCell(9).alignment = { wrapText: true, vertical: 'top' };
+    dataRow.getCell(8).alignment  = { wrapText: true, vertical: 'top' }; // Notes
+    dataRow.getCell(9).alignment  = { wrapText: true, vertical: 'top' }; // Session Feedback
+    dataRow.getCell(10).alignment = { wrapText: true, vertical: 'top' }; // Session Guidance
   }
 
   // ── Sheet 2: Summary ────────────────────────────────────────
@@ -999,18 +1086,35 @@ async function exportToExcel() {
   if (planCheckins.length > 0) {
     addTitle('Check-In Summary');
     addPair('Weeks logged', `${planCheckins.length} of ${totalWeeks}`);
-    const avgRate = planCheckins.reduce((s, c) =>
-      s + c.sessionsCompleted.length / Math.max(1, c.plannedSessions.length), 0) / planCheckins.length;
-    addPair('Average completion', `${Math.round(avgRate * 100)}%`);
-    if (meta.adjustmentReasons?.length) {
-      addPair('Plan adjustments', meta.adjustmentReasons.join('; '));
-    }
+    const avgRate = planCheckins.reduce((s, c) => s + computeWeekAnalysis(c).volumeRate, 0) / planCheckins.length;
+    addPair('Average volume completion', `${Math.round(Math.min(avgRate, 1) * 100)}%`);
     for (const c of planCheckins) {
-      const rate = c.sessionsCompleted.length / Math.max(1, c.plannedSessions.length);
-      const line = `${c.sessionsCompleted.length}/${c.plannedSessions.length} sessions (${Math.round(rate * 100)}%)` +
-        (c.painIssues ? ` — ${c.painIssues}` : '');
+      const analysis       = computeWeekAnalysis(c);
+      const completedCount = c.sessions.filter(s => s.completed).length;
+      const pct            = Math.round(Math.min(analysis.volumeRate, 1) * 100);
+      let line = `${completedCount}/${c.plannedSessions.length} sessions (${pct}%)`;
+      if (analysis.effortAvg !== null) line += ` · avg effort ${analysis.effortAvg.toFixed(1)}`;
+      if (c.painIssues) line += ` — ${c.painIssues}`;
       addPair(`Week ${c.weekNumber}`, line);
     }
+  }
+
+  // ── Plan Transitions ─────────────────────────────────────────
+  if (xlHistory.length > 0) {
+    addTitle('Plan Transitions');
+    for (const h of xlHistory) {
+      const hStart  = h.planStartDate || h.schedule?.[0]?.weekStartDate || '—';
+      const raceStr = h.originalRaceDate ? ` · race ${h.originalRaceDate}` : '';
+      const offStr  = h.weeksOffTrack ? `, ${h.weeksOffTrack} off-track week${h.weeksOffTrack !== 1 ? 's' : ''}` : '';
+      addPair(
+        `Plan v${h.version}`,
+        `started ${hStart}${raceStr} · ${h.weeksCompleted || 0} weeks completed · replaced ${h.archivedAt}${offStr}`,
+      );
+    }
+    const curV     = meta.planVersion || (xlHistory.length + 1);
+    const curStart = meta.planStartDate || schedule[0]?.weekStartDate || '—';
+    const curRace  = meta.raceDateOriginal ? ` · race ${meta.raceDateOriginal}` : '';
+    addPair(`Plan v${curV}`, `started ${curStart}${curRace} (current)`);
   }
 
   // ── Trigger download ────────────────────────────────────────
@@ -1548,81 +1652,320 @@ function restorePlanFromStorage() {
   }
 }
 
+function migrateCheckin(c) {
+  if (c.sessions) return c;
+  const completed = new Set(c.sessionsCompleted || []);
+  const sessions = (c.plannedSessions || []).map(s => ({
+    dayOfWeek:    s.dayOfWeek,
+    completed:    completed.has(s.dayOfWeek),
+    actualDist:   '',
+    effort:       completed.has(s.dayOfWeek) ? (c.rating || null) : null,
+    sessionNotes: '',
+  }));
+  return { ...c, sessions, weeklyNotes: c.notes || '' };
+}
+
 function getCheckins() {
-  try { return JSON.parse(localStorage.getItem('training_checkins') || '[]'); }
-  catch { return []; }
+  try {
+    const raw = JSON.parse(localStorage.getItem('training_checkins') || '[]');
+    return raw.map(migrateCheckin);
+  } catch { return []; }
 }
 
 function saveCheckins(arr) {
   localStorage.setItem('training_checkins', JSON.stringify(arr));
 }
 
-// ── Check-In Adjustment Logic ─────────────────────────────────
-// See: race-standards.md — Underperformance Adjustment Protocols (§ 7)
-
-function getCumulativeMultiplier(planCheckins) {
-  const sorted = [...planCheckins].sort((a, b) => a.weekNumber - b.weekNumber);
-  let multiplier = 1.0;
-
-  for (const c of sorted) {
-    const rate = c.sessionsCompleted.length / Math.max(1, c.plannedSessions.length);
-    if (rate < 0.60) multiplier *= 0.875; // 12.5% reduction per severely missed week
-  }
-
-  // One-time 10% reduction if last 3 check-ins are all under 80% (Pfitzinger)
-  const last3 = sorted.slice(-3);
-  if (last3.length >= 3 &&
-      last3.every(c => c.sessionsCompleted.length / Math.max(1, c.plannedSessions.length) < 0.80)) {
-    multiplier *= 0.90;
-  }
-
-  return Math.max(0.60, multiplier); // floor at 60% of original
+function getArchivedPlans() {
+  try {
+    const raw = localStorage.getItem('training_archived_plans');
+    if (raw) return JSON.parse(raw);
+    // One-time migration from training_plan_history
+    const oldRaw = localStorage.getItem('training_plan_history');
+    if (!oldRaw) return [];
+    const old = JSON.parse(oldRaw);
+    const migrated = old.map((h, i) => ({
+      version:          h.version || (i + 1),
+      planId:           h.planId || '',
+      originalRaceDate: h.meta?.raceDateOriginal || h.meta?.raceDateAdjusted || '',
+      planStartDate:    h.schedule?.[0]?.weekStartDate || '',
+      archivedAt:       h.archivedAt || '',
+      weeksCompleted:   h.weeksCompleted || h.meta?.totalWeeks || (h.schedule ? Math.max(0, ...h.schedule.map(r => r.weekNumber || 0)) : 0),
+      weeksOffTrack:    h.weeksOffTrack || 0,
+      schedule:         h.schedule || [],
+      meta:             h.meta || {},
+      originalInputs:   h.originalInputs || {},
+    }));
+    saveArchivedPlans(migrated);
+    return migrated;
+  } catch { return []; }
 }
 
-function applyCheckinAdjustments(checkin, planCheckins) {
-  const rate = checkin.sessionsCompleted.length / Math.max(1, checkin.plannedSessions.length);
-  const reasons = [];
+function saveArchivedPlans(arr) {
+  try {
+    localStorage.setItem('training_archived_plans', JSON.stringify(arr));
+  } catch (e) {
+    console.warn('[Training] Failed to save archived plans:', e.message);
+  }
+}
 
-  const peakMileageMultiplier = getCumulativeMultiplier(planCheckins);
-  let freezeFirstWeek = false;
-  let downgradeFirstQuality = false;
+// ── Tab switching ─────────────────────────────────────────────
 
-  if (rate < 0.60) {
-    reasons.push(`${Math.round(rate * 100)}% completion — volume reduced ~12%`);
-  } else if (rate < 0.80) {
-    freezeFirstWeek = true;
-    reasons.push(`${Math.round(rate * 100)}% completion — mileage held for 1 week`);
+function switchTab(tab) {
+  if (tab === 'track' && !window._currentSchedule) return;
+  const isGenerate = tab === 'generate';
+  document.getElementById('panelGenerate').style.display = isGenerate ? '' : 'none';
+  document.getElementById('panelTrack').style.display    = isGenerate ? 'none' : '';
+  document.getElementById('tabGenerate').className = 'tab-btn' + (isGenerate ? ' tab-active' : '');
+  document.getElementById('tabTrack').className    = 'tab-btn' + (!isGenerate ? ' tab-active' : (window._currentSchedule ? '' : ' tab-locked'));
+}
+
+function enableTrackTab() {
+  document.getElementById('tabTrack').classList.remove('tab-locked');
+}
+
+// ── Plan summary ──────────────────────────────────────────────
+
+function renderPlanSummary() {
+  if (!window._currentSchedule) return;
+  const { schedule, meta } = window._currentSchedule;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const firstRow     = schedule.find(r => r.weekNumber === 1);
+  const startDate    = firstRow ? parseLocalDate(firstRow.weekStartDate) : getMonday(today);
+  const weeksElapsed = Math.max(0, Math.floor((today - startDate) / (7 * 86400000)));
+  const currentWeek  = Math.min(weeksElapsed + 1, meta.totalWeeks);
+
+  const checkins       = getCheckins().filter(c => c.planId === meta.planId);
+  const weeksCheckedIn = new Set(checkins.map(c => c.weekNumber)).size;
+  const weeksRemaining = Math.max(0, meta.totalWeeks - currentWeek);
+  const offTrackCount  = checkins.filter(c => computeWeekAnalysis(c).offTrack).length;
+
+  document.getElementById('planSummary').innerHTML = `
+    <div class="plan-summary">
+      <div class="ps-stat">
+        <span class="ps-num">${weeksCheckedIn}</span>
+        <span class="ps-label">weeks checked in</span>
+      </div>
+      <div class="ps-stat">
+        <span class="ps-num">${weeksRemaining}</span>
+        <span class="ps-label">weeks remaining</span>
+      </div>
+      <div class="ps-stat">
+        <span class="ps-num">${offTrackCount}</span>
+        <span class="ps-label">off-track weeks</span>
+      </div>
+      <button type="button" class="btn-new-plan" onclick="triggerNewPlanFlow()">Generate New Plan</button>
+    </div>`;
+}
+
+// ── Check-In Analysis ─────────────────────────────────────────
+
+function parseDistance(str) {
+  if (!str) return null;
+  const m = String(str).match(/(\d+(?:\.\d+)?)\s*(?:mi|km|miles|kilometers)/i);
+  return m ? parseFloat(m[1]) : null;
+}
+
+const RUN_TYPES = ['easy run', 'tempo run', 'interval', 'recovery run', 'long run', 'race pace run', 'strides'];
+
+function isRunSession(dayType) {
+  const lower = (dayType || '').toLowerCase();
+  return RUN_TYPES.some(t => lower.includes(t));
+}
+
+function computeWeekAnalysis(checkin) {
+  const planned  = checkin.plannedSessions || [];
+  const sessions = checkin.sessions || [];
+
+  // Separate run vs non-run planned sessions
+  const runPlanned  = planned.filter(s => isRunSession(s.dayType));
+  const allCompleted = sessions.filter(s => s.completed);
+  const runCompleted = allCompleted.filter(s => {
+    const plan = planned.find(p => p.dayOfWeek === s.dayOfWeek);
+    return plan && isRunSession(plan.dayType);
+  });
+
+  // Completion rate: run sessions only (strength doesn't count)
+  const completionRate = runCompleted.length / Math.max(1, runPlanned.length);
+
+  // Volume: run sessions only, distance-based when available
+  const plannedDists = runPlanned.map(s => parseDistance(s.distanceDuration)).filter(d => d !== null);
+  const actualDists  = runCompleted.map(s => parseDistance(s.actualDist)).filter(d => d !== null);
+
+  let volumeRate;
+  if (plannedDists.length > 0 && actualDists.length > 0) {
+    const plannedSum = plannedDists.reduce((a, b) => a + b, 0);
+    const actualSum  = actualDists.reduce((a, b) => a + b, 0);
+    volumeRate = actualSum / plannedSum;
+  } else {
+    volumeRate = completionRate;
   }
 
-  // Consecutive underperformance already baked into getCumulativeMultiplier;
-  // add a reason string if it triggered
-  const last3 = [...planCheckins].sort((a, b) => a.weekNumber - b.weekNumber).slice(-3);
-  if (last3.length >= 3 &&
-      last3.every(c => c.sessionsCompleted.length / Math.max(1, c.plannedSessions.length) < 0.80)) {
-    reasons.push('3 consecutive weeks under 80% — peak mileage reduced 10%');
-  }
+  // Effort: run sessions only
+  const effortVals = runCompleted.map(s => s.effort).filter(e => e !== null);
+  const effortAvg  = effortVals.length > 0
+    ? effortVals.reduce((a, b) => a + b, 0) / effortVals.length
+    : null;
 
-  // Missed quality session + underperformance → downgrade first easy run next week
-  if (rate < 0.80) {
-    const qualityMissed = checkin.plannedSessions.some(s =>
-      (s.dayType.toLowerCase().includes('tempo') || s.dayType.toLowerCase().includes('interval')) &&
-      !checkin.sessionsCompleted.includes(s.dayOfWeek)
-    );
-    if (qualityMissed) {
-      downgradeFirstQuality = true;
-      reasons.push('Quality session missed — first easy run next week changed to recovery run');
+  const QUALITY_TYPES = ['tempo', 'interval', 'long run', 'race pace'];
+  const qualityCompleted = runCompleted.filter(s => {
+    const plan = planned.find(p => p.dayOfWeek === s.dayOfWeek);
+    return QUALITY_TYPES.some(q => plan?.dayType?.toLowerCase().includes(q));
+  });
+
+  const offTrack = volumeRate < 0.80
+    || (effortAvg !== null && effortAvg < 2.0 && qualityCompleted.length >= 1);
+
+  return { completionRate, volumeRate, effortAvg, offTrack };
+}
+
+function computeOffTrackStreak(planCheckins) {
+  const sorted = [...planCheckins].sort((a, b) => b.weekNumber - a.weekNumber);
+  let streak = 0;
+  for (const c of sorted) {
+    if (computeWeekAnalysis(c).offTrack) streak++;
+    else break;
+  }
+  return streak;
+}
+
+function getISOWeek(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+  const yearStart = new Date(d.getFullYear(), 0, 1);
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+
+function dismissWarning() {
+  if (!window._currentSchedule) return;
+  localStorage.setItem('training_warning_dismissed', JSON.stringify({
+    planId:  window._currentSchedule.meta.planId,
+    isoWeek: getISOWeek(new Date()),
+  }));
+  document.getElementById('offTrackBanner').style.display = 'none';
+}
+
+function archiveCurrentPlan() {
+  if (!window._currentSchedule) return;
+  try {
+    const { schedule, meta } = window._currentSchedule;
+    const archived = getArchivedPlans();
+    if (archived.some(h => h.planId === meta.planId)) return; // already archived
+
+    // Determine how many weeks have elapsed
+    const planStart = meta.planStartDate ? parseLocalDate(meta.planStartDate) : null;
+    let currentWeek = meta.totalWeeks || 1;
+    if (planStart) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const weeksElapsed = Math.floor((today - planStart) / (7 * 24 * 60 * 60 * 1000));
+      currentWeek = Math.min(weeksElapsed + 1, meta.totalWeeks || 1);
     }
-  }
 
-  return { factors: { peakMileageMultiplier, freezeFirstWeek, downgradeFirstQuality }, reasons };
+    // Only keep completed weeks
+    const completedSchedule = schedule.filter(r => (r.weekNumber || 0) <= currentWeek);
+
+    const checkins = getCheckins().filter(c => c.planId === meta.planId);
+    const weeksOffTrack = checkins.filter(c => {
+      try { return computeWeekAnalysis(c).offTrack; } catch { return false; }
+    }).length;
+
+    archived.push({
+      version:          meta.planVersion || (archived.length + 1),
+      planId:           meta.planId,
+      originalRaceDate: meta.raceDateOriginal || meta.raceDateAdjusted || '',
+      planStartDate:    meta.planStartDate || schedule[0]?.weekStartDate || '',
+      archivedAt:       isoDate(new Date()),
+      weeksCompleted:   currentWeek,
+      weeksOffTrack,
+      schedule:         completedSchedule,
+      meta,
+      originalInputs:   window._currentInputs || {},
+    });
+    saveArchivedPlans(archived);
+    console.log('[Training] Archived plan', meta.planId, '→ weeks completed:', currentWeek, '→ archived count:', archived.length);
+  } catch (e) {
+    console.warn('[Training] Failed to archive plan:', e.message);
+  }
+}
+
+function triggerNewPlanFlow() {
+  if (!window._currentInputs) return;
+  const inputs = window._currentInputs;
+  const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val ?? ''; };
+
+  setVal('raceDate',   '');
+  setVal('goalTime',   '');
+  setVal('currentTime', inputs.currentTime   || '');
+  setVal('weeklyMileage', inputs.weeklyMileage || '');
+  setVal('runDays',    inputs.runDays      || '');
+  setVal('strengthDays', inputs.strengthDays || '');
+  setVal('weight',     inputs.weight       || '');
+  setVal('injuries',   inputs.injuries     || '');
+  setVal('trainingStartDate', isoDate(getMonday(new Date())));
+
+  if (inputs.raceDistance) setVal('raceDistance', inputs.raceDistance);
+
+  ['fitnessCardio', 'fitnessStrength', 'fitnessFlexibility'].forEach(name => {
+    const radio = document.querySelector(`input[name="${name}"][value="${inputs[name] || ''}"]`);
+    if (radio) radio.checked = true;
+  });
+
+  document.getElementById('unitToggle').checked = inputs.units === 'metric';
+  applyUnits();
+
+  switchTab('generate');
+
+  const warningEl = document.getElementById('warningBanner');
+  warningEl.className = 'warning-banner warning-info';
+  warningEl.innerHTML = '<strong>Replanning:</strong> Enter a new race date (and optionally a new goal time) then click Generate.';
+  warningEl.style.display = 'block';
+  document.getElementById('raceDate').focus();
+}
+
+function renderWarningBanner() {
+  const banner = document.getElementById('offTrackBanner');
+  if (!window._currentSchedule) { banner.style.display = 'none'; return; }
+
+  const { meta } = window._currentSchedule;
+  const checkins  = getCheckins().filter(c => c.planId === meta.planId);
+  if (checkins.length < 2) { banner.style.display = 'none'; return; }
+
+  const streak = computeOffTrackStreak(checkins);
+  if (streak < 2) { banner.style.display = 'none'; return; }
+
+  try {
+    const dismissed = JSON.parse(localStorage.getItem('training_warning_dismissed') || 'null');
+    if (dismissed?.planId === meta.planId && dismissed?.isoWeek === getISOWeek(new Date())) {
+      banner.style.display = 'none';
+      return;
+    }
+  } catch { /* ignore */ }
+
+  const raceDate = meta.raceDateAdjusted || meta.raceDateOriginal || '';
+  const racePart = raceDate ? `Your ${raceDate} race goal` : 'Your race goal';
+  banner.className = 'off-track-banner';
+  banner.innerHTML = `
+    <div class="otb-message">
+      <strong>You've been off-track for ${streak} week${streak > 1 ? 's' : ''}.</strong>
+      ${racePart} may be unachievable at this pace.
+    </div>
+    <div class="otb-actions">
+      <button type="button" class="btn-replan" onclick="triggerNewPlanFlow()">Generate New Plan</button>
+      <button type="button" class="btn-keep-plan" onclick="dismissWarning()">Keep Current Plan</button>
+    </div>`;
+  banner.style.display = 'block';
 }
 
 // ── Check-In UI ───────────────────────────────────────────────
 
 function renderCheckinSection() {
-  const section = document.getElementById('checkinSection');
   if (!window._currentSchedule) return;
-  section.style.display = 'block';
+  enableTrackTab();
+  renderPlanSummary();
 
   const { schedule, meta } = window._currentSchedule;
   const today = new Date();
@@ -1655,74 +1998,242 @@ function renderCheckinSection() {
   document.getElementById('checkinResult').style.display = 'none';
   renderCheckinForm(currentWeek);
   renderCheckinHistory();
+  renderWarningBanner();
 }
 
 function renderCheckinForm(weekNum) {
   if (!window._currentSchedule) return;
   const { schedule, meta } = window._currentSchedule;
-  const checkins  = getCheckins();
-  const existing  = checkins.find(c => c.planId === meta.planId && c.weekNumber === weekNum);
-  const sessions  = schedule.filter(r => r.weekNumber === weekNum && !r.dayType.toLowerCase().includes('rest'));
+  const checkins        = getCheckins();
+  const existing        = checkins.find(c => c.planId === meta.planId && c.weekNumber === weekNum);
+  const plannedSessions = schedule.filter(r => r.weekNumber === weekNum && !r.dayType.toLowerCase().includes('rest'));
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const EFFORT_LABELS = ['', 'Very Easy', 'Easy', 'Moderate', 'Hard', 'Very Hard'];
 
   const list = document.getElementById('checkinSessionList');
   list.innerHTML = '';
-  sessions.forEach(s => {
-    const done = existing?.sessionsCompleted.includes(s.dayOfWeek) ?? false;
-    const lbl  = document.createElement('label');
-    lbl.className = 'checkin-session-item';
-    lbl.innerHTML = `
-      <input type="checkbox" class="checkin-session-cb" value="${s.dayOfWeek}" ${done ? 'checked' : ''}>
-      <span class="ci-day">${s.dayOfWeek.slice(0, 3)}</span>
-      <span class="ci-type">${s.dayType}</span>
-      <span class="ci-dist">${s.distanceDuration}</span>`;
-    list.appendChild(lbl);
+
+  plannedSessions.forEach(s => {
+    const sessionDate = parseLocalDate(s.date);
+    const isFuture    = sessionDate > today;
+
+    const existSess  = existing?.sessions?.find(e => e.dayOfWeek === s.dayOfWeek);
+    const done       = !isFuture && (existSess?.completed ?? false);
+    const effort     = existSess?.effort ?? null;
+    const actualDist = escHtml(existSess?.actualDist ?? '');
+    const sessNotes  = escHtml(existSess?.sessionNotes ?? '');
+
+    const item = document.createElement('div');
+    item.className = 'checkin-session-item' + (isFuture ? ' csi-future' : '');
+    item.dataset.day = s.dayOfWeek;
+
+    if (isFuture) {
+      item.innerHTML = `
+        <div class="csi-main">
+          <input type="checkbox" class="checkin-session-cb" value="${s.dayOfWeek}" disabled>
+          <span class="ci-day">${s.dayOfWeek.slice(0, 3)}</span>
+          <span class="ci-type">${s.dayType}</span>
+          <span class="ci-dist">${s.distanceDuration}</span>
+          <span class="csi-future-label">upcoming</span>
+        </div>`;
+    } else {
+      const effortBtns = [1,2,3,4,5].map(n =>
+        `<button type="button" class="effort-btn${effort === n ? ' effort-active' : ''}"
+                 data-day="${s.dayOfWeek}" data-effort="${n}" title="${EFFORT_LABELS[n]}"
+                 onclick="selectEffort('${s.dayOfWeek}', ${n})">${n}</button>`
+      ).join('');
+
+      item.innerHTML = `
+        <div class="csi-main">
+          <input type="checkbox" class="checkin-session-cb" value="${s.dayOfWeek}"
+                 ${done ? 'checked' : ''} onchange="toggleSessionDetail('${s.dayOfWeek}', this.checked)">
+          <span class="ci-day">${s.dayOfWeek.slice(0, 3)}</span>
+          <span class="ci-type">${s.dayType}</span>
+          <span class="ci-dist">${s.distanceDuration}</span>
+        </div>
+        <div class="csi-detail csi-done" style="display:${done ? 'flex' : 'none'}">
+          <div class="csi-row">
+            <label class="csi-label">Actual</label>
+            <input type="text" class="csi-dist-input" value="${actualDist}"
+                   placeholder="${s.distanceDuration}" data-day="${s.dayOfWeek}">
+          </div>
+          <div class="csi-row">
+            <label class="csi-label">Effort</label>
+            <div class="csi-effort-btns">${effortBtns}</div>
+            <span class="effort-label-text">${effort ? EFFORT_LABELS[effort] : '—'}</span>
+          </div>
+          <div class="csi-row">
+            <label class="csi-label">Notes</label>
+            <input type="text" class="csi-notes-input csi-done-notes" value="${sessNotes}"
+                   placeholder="optional" data-day="${s.dayOfWeek}">
+          </div>
+        </div>
+        <div class="csi-detail csi-skip" style="display:${!done ? 'flex' : 'none'}">
+          <div class="csi-row">
+            <label class="csi-label">Reason</label>
+            <input type="text" class="csi-notes-input csi-skip-notes" value="${sessNotes}"
+                   placeholder="skipped — optional" data-day="${s.dayOfWeek}">
+          </div>
+        </div>`;
+    }
+
+    list.appendChild(item);
   });
 
-  // Restore rating
-  document.querySelectorAll('input[name="checkinRating"]').forEach(r => {
-    r.checked = existing ? r.value === String(existing.rating) : r.value === '3';
-  });
-
-  document.getElementById('checkinPain').value  = existing?.painIssues || '';
-  document.getElementById('checkinNotes').value = existing?.notes || '';
+  document.getElementById('checkinPain').value  = existing?.painIssues  || '';
+  document.getElementById('checkinNotes').value = existing?.weeklyNotes || '';
   document.getElementById('checkinSubmitBtn').textContent = existing ? 'Update Check-In' : 'Submit Check-In';
+  updateSubmitButtonState();
+}
+
+function updateSubmitButtonState() {
+  const btn = document.getElementById('checkinSubmitBtn');
+  if (!btn) return;
+  const anyChecked = [...document.querySelectorAll('.checkin-session-cb:not([disabled])')].some(cb => cb.checked);
+  btn.disabled = !anyChecked;
+}
+
+function toggleSessionDetail(dayOfWeek, checked) {
+  const item = document.querySelector(`.checkin-session-item[data-day="${dayOfWeek}"]`);
+  if (!item) return;
+  item.querySelector('.csi-done').style.display = checked ? 'flex' : 'none';
+  item.querySelector('.csi-skip').style.display = checked ? 'none' : 'flex';
+  updateSubmitButtonState();
+}
+
+function selectEffort(dayOfWeek, value) {
+  const EFFORT_LABELS = ['', 'Very Easy', 'Easy', 'Moderate', 'Hard', 'Very Hard'];
+  const item = document.querySelector(`.checkin-session-item[data-day="${dayOfWeek}"]`);
+  if (!item) return;
+  item.querySelectorAll('.effort-btn').forEach(btn => {
+    btn.classList.toggle('effort-active', parseInt(btn.dataset.effort) === value);
+  });
+  const labelEl = item.querySelector('.effort-label-text');
+  if (labelEl) labelEl.textContent = EFFORT_LABELS[value] || '—';
 }
 
 function renderCheckinHistory() {
   if (!window._currentSchedule) return;
-  const { meta } = window._currentSchedule;
-  const checkins  = getCheckins()
-    .filter(c => c.planId === meta.planId)
-    .sort((a, b) => b.weekNumber - a.weekNumber);
+  const { schedule: currentSchedule, meta: currentMeta } = window._currentSchedule;
+  const allCheckins = getCheckins();
+  const archived = getArchivedPlans();
+  const EFFORT_SHORT = ['', 'VE', 'E', 'M', 'H', 'VH'];
+
+  const allPlans = [
+    {
+      version:        currentMeta.planVersion || (archived.length + 1),
+      meta:           currentMeta,
+      schedule:       currentSchedule,
+      isCurrent:      true,
+      archivedAt:     null,
+      weeksCompleted: null,
+      weeksOffTrack:  null,
+      planStartDate:  currentMeta.planStartDate || currentSchedule[0]?.weekStartDate || '',
+      originalRaceDate: currentMeta.raceDateOriginal || '',
+    },
+    ...archived.slice().reverse().map(h => ({
+      version:        h.version,
+      meta:           h.meta,
+      schedule:       h.schedule,
+      isCurrent:      false,
+      archivedAt:     h.archivedAt,
+      weeksCompleted: h.weeksCompleted,
+      weeksOffTrack:  h.weeksOffTrack,
+      planStartDate:  h.planStartDate || h.schedule?.[0]?.weekStartDate || '',
+      originalRaceDate: h.originalRaceDate || h.meta?.raceDateOriginal || '',
+    })),
+  ];
 
   const container = document.getElementById('checkinHistory');
-  if (checkins.length === 0) { container.innerHTML = ''; return; }
+  container.innerHTML = '<h3 class="checkin-history-title">Check-In History</h3>';
 
-  const STARS = n => '★'.repeat(n) + '☆'.repeat(5 - n);
-  const DAY3  = d => d.slice(0, 3);
+  for (const planEntry of allPlans) {
+    const planCheckins = allCheckins
+      .filter(c => c.planId === planEntry.meta.planId)
+      .sort((a, b) => b.weekNumber - a.weekNumber);
 
-  container.innerHTML = `<h3 class="checkin-history-title">Check-In History</h3>`;
-  for (const c of checkins) {
-    const rate    = c.sessionsCompleted.length / Math.max(1, c.plannedSessions.length);
-    const pct     = Math.round(rate * 100);
-    const phase   = window._currentSchedule.schedule.find(r => r.weekNumber === c.weekNumber)?.phase || '';
-    const dots    = c.plannedSessions.map(s => {
-      const done = c.sessionsCompleted.includes(s.dayOfWeek);
-      return `<span class="chc-session-dot ${done ? 'chc-done' : 'chc-miss'}">${DAY3(s.dayOfWeek)} ${done ? '✓' : '✗'}</span>`;
-    }).join('');
+    if (!planEntry.isCurrent && planCheckins.length === 0) continue;
 
-    const card = document.createElement('div');
-    card.className = 'checkin-history-card';
-    card.innerHTML = `
-      <div class="chc-header">
-        <span class="chc-week">Week ${c.weekNumber}</span>
-        <span class="chc-phase">${phase}</span>
-        <span class="chc-completion">${c.sessionsCompleted.length}/${c.plannedSessions.length} sessions (${pct}%)</span>
-        <span class="chc-rating">${STARS(c.rating)}</span>
-      </div>
-      <div class="chc-sessions">${dots}</div>
-      ${c.painIssues ? `<div class="chc-pain">${escHtml(c.painIssues)}</div>` : ''}`;
-    container.appendChild(card);
+    const sectionId  = `phsec-${planEntry.meta.planId}`;
+    const startStr   = planEntry.planStartDate
+      ? (() => { try { return parseLocalDate(planEntry.planStartDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); } catch { return ''; } })()
+      : '';
+    const raceStr    = planEntry.originalRaceDate
+      ? (() => { try { return ' · race ' + parseLocalDate(planEntry.originalRaceDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); } catch { return ''; } })()
+      : '';
+
+    let headerText;
+    if (planEntry.isCurrent) {
+      headerText = `Plan v${planEntry.version}${startStr ? ' — started ' + startStr : ''}${raceStr} (current)`;
+    } else {
+      const wkStr  = planEntry.weeksCompleted != null ? ` · ${planEntry.weeksCompleted} wk${planEntry.weeksCompleted !== 1 ? 's' : ''} completed` : '';
+      const endStr = planEntry.archivedAt
+        ? (() => { try { return ' → ' + parseLocalDate(planEntry.archivedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); } catch { return ''; } })()
+        : '';
+      headerText = `Plan v${planEntry.version}${startStr ? ' — ' + startStr : ''}${endStr}${raceStr}${wkStr}`;
+    }
+
+    const section = document.createElement('div');
+    section.className = 'plan-history-section';
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'plan-history-toggle' + (planEntry.isCurrent ? ' pht-expanded' : '');
+    toggle.setAttribute('aria-expanded', planEntry.isCurrent ? 'true' : 'false');
+    toggle.textContent = headerText;
+
+    const contentEl = document.createElement('div');
+    contentEl.id = sectionId;
+    contentEl.style.display = planEntry.isCurrent ? 'block' : 'none';
+
+    toggle.onclick = () => {
+      const expanded = toggle.getAttribute('aria-expanded') === 'true';
+      toggle.setAttribute('aria-expanded', String(!expanded));
+      toggle.classList.toggle('pht-expanded', !expanded);
+      contentEl.style.display = expanded ? 'none' : 'block';
+    };
+
+    if (planCheckins.length === 0) {
+      contentEl.innerHTML = '<p class="chc-empty">No check-ins yet.</p>';
+    } else {
+      for (const c of planCheckins) {
+        const analysis       = computeWeekAnalysis(c);
+        const completedCount = c.sessions.filter(s => s.completed).length;
+        const pct            = Math.round(Math.min(analysis.volumeRate, 1) * 100);
+        const phase          = planEntry.schedule.find(r => r.weekNumber === c.weekNumber)?.phase || '';
+
+        const dots = c.sessions.map(s => {
+          const cls         = s.completed ? 'chc-done' : 'chc-miss';
+          const effortLabel = s.completed && s.effort ? ` ${EFFORT_SHORT[s.effort]}` : '';
+          return `<span class="chc-session-dot ${cls}">${s.dayOfWeek.slice(0, 3)}${effortLabel} ${s.completed ? '✓' : '✗'}</span>`;
+        }).join('');
+
+        const effortStr = analysis.effortAvg !== null
+          ? ` · avg effort ${analysis.effortAvg.toFixed(1)}` : '';
+        const volumeStr = analysis.volumeRate !== analysis.completionRate
+          ? ` · ${pct}% vol` : '';
+
+        const card = document.createElement('div');
+        card.className = 'checkin-history-card' + (analysis.offTrack ? ' chc-off-track' : '');
+        card.innerHTML = `
+          <div class="chc-header">
+            <span class="chc-week">Week ${c.weekNumber}</span>
+            <span class="chc-phase">${phase}</span>
+            <span class="chc-completion">${completedCount}/${c.plannedSessions.length} sessions${volumeStr}${effortStr}</span>
+            ${analysis.offTrack ? '<span class="chc-off-track-badge">off-track</span>' : ''}
+          </div>
+          <div class="chc-sessions">${dots}</div>
+          ${c.painIssues ? `<div class="chc-pain">${escHtml(c.painIssues)}</div>` : ''}`;
+        contentEl.appendChild(card);
+      }
+    }
+
+    section.appendChild(toggle);
+    section.appendChild(contentEl);
+    container.appendChild(section);
   }
 }
 
@@ -1733,150 +2244,106 @@ async function submitCheckin() {
   const weekNum = parseInt(document.getElementById('checkinWeekSelect').value);
   if (!weekNum) return;
 
-  const sessions     = schedule.filter(r => r.weekNumber === weekNum && !r.dayType.toLowerCase().includes('rest'));
-  const completedDays = [...document.querySelectorAll('.checkin-session-cb:checked')].map(cb => cb.value);
-  const ratingEl     = document.querySelector('input[name="checkinRating"]:checked');
-  const painIssues   = document.getElementById('checkinPain').value.trim();
-  const notes        = document.getElementById('checkinNotes').value.trim();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const plannedSessions = schedule.filter(r =>
+    r.weekNumber === weekNum && !r.dayType.toLowerCase().includes('rest')
+  );
+
+  // Collect per-session data
+  const sessions = [];
+  document.querySelectorAll('#checkinSessionList .checkin-session-item').forEach(item => {
+    const dayOfWeek  = item.dataset.day;
+    const cb         = item.querySelector('.checkin-session-cb');
+    const completed  = cb?.checked ?? false;
+    const actualDist = completed
+      ? (item.querySelector('.csi-dist-input')?.value.trim() || '')
+      : '';
+    const effortBtn  = item.querySelector('.effort-btn.effort-active');
+    const effort     = completed && effortBtn ? parseInt(effortBtn.dataset.effort) : null;
+    const notesInput = item.querySelector(
+      completed ? '.csi-done-notes' : '.csi-skip-notes'
+    );
+    const sessionNotes = notesInput?.value.trim() || '';
+    sessions.push({ dayOfWeek, completed, actualDist, effort, sessionNotes });
+  });
+
+  const painIssues  = document.getElementById('checkinPain').value.trim();
+  const weeklyNotes = document.getElementById('checkinNotes').value.trim();
+
+  // Reject if any future-dated session was checked as completed
+  const invalidSessions = sessions.filter(s => {
+    if (!s.completed) return false;
+    const row = plannedSessions.find(r => r.dayOfWeek === s.dayOfWeek);
+    return row && parseLocalDate(row.date) > today;
+  });
+  if (invalidSessions.length > 0) {
+    const names = invalidSessions.map(s => s.dayOfWeek.slice(0, 3)).join(', ');
+    const resultEl = document.getElementById('checkinResult');
+    resultEl.textContent = `Can't log future sessions (${names}). Uncheck them to submit.`;
+    resultEl.className   = 'checkin-result cr-adjusted';
+    resultEl.style.display = 'block';
+    resultEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    return;
+  }
 
   const checkin = {
-    planId:           meta.planId,
-    weekNumber:       weekNum,
-    plannedSessions:  sessions.map(s => ({ dayOfWeek: s.dayOfWeek, dayType: s.dayType, distanceDuration: s.distanceDuration })),
-    sessionsCompleted: completedDays,
-    rating:           ratingEl ? parseInt(ratingEl.value) : 3,
+    planId:          meta.planId,
+    weekNumber:      weekNum,
+    plannedSessions: plannedSessions.map(s => ({
+      dayOfWeek: s.dayOfWeek, dayType: s.dayType, distanceDuration: s.distanceDuration,
+    })),
+    sessions,
     painIssues,
-    notes,
-    timestamp:        new Date().toISOString(),
+    weeklyNotes,
+    timestamp: new Date().toISOString(),
   };
 
-  // Upsert check-in
+  // Upsert
   const allCheckins = getCheckins();
   const idx = allCheckins.findIndex(c => c.planId === meta.planId && c.weekNumber === weekNum);
   if (idx >= 0) allCheckins[idx] = checkin; else allCheckins.push(checkin);
   saveCheckins(allCheckins);
 
-  const planCheckins = allCheckins.filter(c => c.planId === meta.planId);
-  const { factors, reasons } = applyCheckinAdjustments(checkin, planCheckins);
-
-  // Assess new injury if reported
+  // Injury assessment (informational only — no plan regeneration)
   const btn = document.getElementById('checkinSubmitBtn');
-  let mergedInjuryProfile;
-  const originalInputsRaw = localStorage.getItem('training_schedule_original_inputs');
-  const originalInputs    = originalInputsRaw ? JSON.parse(originalInputsRaw) : (window._currentInputs || {});
-  const baseInjury        = originalInputs.injuryProfile || { severity: 'none', modifications: [], keywords: [] };
-  mergedInjuryProfile     = baseInjury;
-
   if (painIssues) {
-    btn.disabled = true;
+    btn.disabled    = true;
     btn.textContent = 'Assessing injury…';
     try {
-      const apiKey     = localStorage.getItem('gemini_api_key') || '';
-      const newProfile = await resolveInjuryProfile(painIssues, apiKey);
-      if (newProfile.severity !== 'none') {
-        const sevOrder = ['none', 'mild', 'moderate', 'severe'];
-        const takeSev  = sevOrder.indexOf(newProfile.severity) > sevOrder.indexOf(baseInjury.severity)
-          ? newProfile.severity : baseInjury.severity;
-        mergedInjuryProfile = {
-          severity:          takeSev,
-          modifications:     [...(baseInjury.modifications || []), ...(newProfile.modifications || [])],
-          keywords:          [...new Set([...(baseInjury.keywords || []), ...(newProfile.keywords || [])])],
-          rehabExercises:    newProfile.rehabExercises || baseInjury.rehabExercises || '',
-          raceDateAdjustment: newProfile.raceDateAdjustment ?? null,
-          source:            newProfile.source,
-        };
-        reasons.push(`New ${newProfile.severity} issue — injury protocols applied to remaining plan`);
-      }
+      const apiKey = localStorage.getItem('gemini_api_key') || '';
+      await resolveInjuryProfile(painIssues, apiKey);
     } finally {
-      btn.disabled = false;
+      btn.disabled    = false;
       btn.textContent = 'Update Check-In';
     }
   }
 
-  // Regenerate remaining weeks from the week after check-in
-  const checkedWeekRow = schedule.find(r => r.weekNumber === weekNum);
-  const nextWeekStart  = checkedWeekRow
-    ? addDays(parseLocalDate(checkedWeekRow.weekStartDate), 7)
-    : getMonday(new Date());
+  // Refresh week selector check marks
+  const refreshedCheckins = getCheckins().filter(c => c.planId === meta.planId);
+  const select = document.getElementById('checkinWeekSelect');
+  Array.from(select.options).forEach(opt => {
+    const w          = parseInt(opt.value);
+    const hasCheckin = refreshedCheckins.some(c => c.weekNumber === w);
+    const phaseRow   = schedule.find(r => r.weekNumber === w);
+    opt.textContent  = `Week ${w} — ${phaseRow?.phase || ''}${hasCheckin ? ' ✓' : ''}`;
+  });
 
-  const completionRate = sessions.length > 0 ? completedDays.length / sessions.length : 1;
-  const origWeeklyMileage = originalInputs.weeklyMileage || 0;
+  renderWarningBanner();
+  renderCheckinHistory();
 
-  const regenInputs = {
-    ...originalInputs,
-    trainingStartDate:     nextWeekStart,
-    weeklyMileage:         origWeeklyMileage * completionRate,
-    injuryProfile:         mergedInjuryProfile,
-    _planId:               meta.planId,
-    _isCheckinRegen:       true,
-    _peakMileageMultiplier: factors.peakMileageMultiplier,
-    _freezeFirstWeek:      factors.freezeFirstWeek,
-  };
-  if (regenInputs.trainingStartDate && typeof regenInputs.trainingStartDate === 'string') {
-    regenInputs.trainingStartDate = parseLocalDate(regenInputs.trainingStartDate);
-  }
+  // Show result
+  const analysis       = computeWeekAnalysis(checkin);
+  const completedCount = sessions.filter(s => s.completed).length;
+  const pct            = Math.round(Math.min(analysis.volumeRate, 1) * 100);
+  let msg              = `Week ${weekNum} logged: ${completedCount}/${plannedSessions.length} sessions`;
+  if (analysis.effortAvg !== null) msg += ` · avg effort ${analysis.effortAvg.toFixed(1)}`;
+  msg += ` (${pct}% volume)`;
 
-  const regen = generateSchedule(regenInputs);
-
-  // Downgrade first easy run if a quality session was missed
-  if (factors.downgradeFirstQuality) {
-    const firstEasy = regen.schedule.find(r => r.dayType === 'Easy Run' && !r.isHistorical);
-    if (firstEasy) {
-      const distMiles = DIST_MILES[originalInputs.raceDistance];
-      const rp = parseTime(originalInputs.currentTime) && distMiles
-        ? parseTime(originalInputs.currentTime) / distMiles : null;
-      const gp = parseTime(originalInputs.goalTime) && distMiles
-        ? parseTime(originalInputs.goalTime) / distMiles : null;
-      firstEasy.dayType = 'Recovery Run';
-      firstEasy.sessionGuidance = getSessionGuidance(
-        'Recovery Run', firstEasy.phase,
-        originalInputs.fitnessCardio, originalInputs.fitnessStrength,
-        rp, gp, originalInputs.units
-      );
-    }
-  }
-
-  // Build locked weeks (1..weekNum) with check-in status overlay
-  const storedSchedule = (() => {
-    try { return JSON.parse(localStorage.getItem('training_schedule') || '{}').schedule || schedule; }
-    catch { return schedule; }
-  })();
-
-  const lockedRows = storedSchedule
-    .filter(r => r.weekNumber <= weekNum)
-    .map(r => {
-      const wc = planCheckins.find(c => c.weekNumber === r.weekNumber);
-      if (!wc || r.phase === 'Race' || r.dayType.toLowerCase().includes('rest')) {
-        return { ...r, checkinStatus: '' };
-      }
-      return { ...r, checkinStatus: wc.sessionsCompleted.includes(r.dayOfWeek) ? 'completed' : 'missed' };
-    });
-
-  // Offset regen week numbers to follow locked weeks
-  const regenRows = regen.schedule.map(r => ({ ...r, weekNumber: r.weekNumber + weekNum, checkinStatus: '' }));
-
-  const merged = {
-    schedule: [...lockedRows, ...regenRows],
-    meta: {
-      ...regen.meta,
-      planId:     meta.planId,
-      totalWeeks: weekNum + regen.meta.totalWeeks,
-      adjustmentReasons: reasons,
-    },
-  };
-
-  window._currentSchedule = merged;
-  savePlanToStorage(merged, regenInputs);
-  renderPreview(merged);
-  renderCheckinSection();
-
-  // Show result banner
-  const resultEl  = document.getElementById('checkinResult');
-  const pct       = Math.round(completionRate * 100);
-  let msg         = `Week ${weekNum} logged: ${completedDays.length}/${sessions.length} sessions (${pct}%).`;
-  if (reasons.length) msg += ' ' + reasons.join('. ') + '.';
-  resultEl.textContent = msg;
-  resultEl.className   = 'checkin-result ' + (completionRate >= 0.80 ? 'cr-good' : 'cr-adjusted');
+  const resultEl        = document.getElementById('checkinResult');
+  resultEl.textContent  = msg;
+  resultEl.className    = 'checkin-result ' + (analysis.volumeRate >= 0.80 ? 'cr-good' : 'cr-adjusted');
   resultEl.style.display = 'block';
   resultEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
