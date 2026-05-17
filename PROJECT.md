@@ -455,6 +455,64 @@ During documentation, Build 6×800m and Peak 8×600m interval offsets were found
 
 ---
 
+---
+
+## Stage 11: Weekly Check-In System *(in progress)*
+
+### What it does
+
+After a plan is generated, a **Weekly Check-In** panel appears below the schedule. The user can log how a week went — which sessions they completed, how it felt (1–5 rating), any new pain, and notes. Submitting a check-in regenerates the remaining plan from the next week forward with evidence-based adjustments applied.
+
+### UI
+
+A `#checkinSection` div (hidden until a plan exists) contains:
+- **Week selector** — dropdown listing weeks up to and including the current week, pre-selecting the inferred current week based on the plan start date. Weeks with a saved check-in show a ✓.
+- **Session checklist** — one row per non-rest session for that week, pre-populated from the schedule. Each row shows day abbreviation, workout type, and distance/duration.
+- **Effort rating** — 1 (Very hard) to 5 (Strong), defaulting to 3.
+- **Pain field** — optional free text. If filled, triggers a Gemini injury re-assessment.
+- **Notes field** — optional free text.
+- **Check-In History** — cards beneath the form showing all past check-ins for the current plan, most recent first. Each card shows completion rate, star rating, session dots (✓ / ✗), and any pain notes.
+
+### localStorage persistence
+
+Two keys hold all check-in state:
+
+| Key | Contents |
+|---|---|
+| `training_schedule` | JSON of `{ schedule, meta, inputs }` for the current plan, written on every plan generation and every check-in submission. `meta.planId` is a `Date.now()` timestamp set on first generation and preserved across regen. |
+| `training_checkins` | JSON array of all check-in records across all plans. Each record contains `planId`, `weekNumber`, `plannedSessions`, `sessionsCompleted`, `rating`, `painIssues`, `notes`, and `timestamp`. |
+
+On page load, `restorePlanFromStorage()` rehydrates `window._currentSchedule`, `window._currentInputs`, and renders both the preview table and check-in section — so a user can return to their plan in a later session without re-submitting the form.
+
+### Underperformance adjustment protocol
+
+Check-in submissions compute three adjustments via `applyCheckinAdjustments(checkin, allPlanCheckins)`, based on principles from coaching literature:
+
+| Trigger | Adjustment | Rationale |
+|---|---|---|
+| Last week's completion < 80% | Hold first week of regen at current mileage (`_freezeFirstWeek = true`) | One underperformance week — let the body catch up before increasing load |
+| 3 consecutive weeks all < 80% | Reduce peak mileage by 10% (`_peakMileageMultiplier = 0.90`) | Sustained underperformance signals the target load is too high; revise the plan ceiling |
+| < 80% completion AND a quality session (tempo/interval) missed | Downgrade first easy run in regen to Recovery Run | Missed quality sessions indicate accumulated fatigue — the next week opens with controlled effort |
+
+The 80% completion threshold and 10% mileage reduction are not guesses — they are drawn from the underperformance and adaptation principles documented in `race-standards.md`. A single sub-threshold week is treated as normal variation; only sustained patterns trigger structural changes.
+
+### Plan regeneration
+
+On check-in submission:
+
+1. Weeks 1 through the checked-in week are **locked** from the stored schedule, with `checkinStatus: 'completed' | 'missed'` overlaid on each session row (used for Excel coloring).
+2. `generateSchedule` is called with the original inputs, modified by the computed factors (`_peakMileageMultiplier`, `_freezeFirstWeek`), starting from the next week.
+3. The regen's week numbers are offset by `weekNum` so the combined schedule is contiguous.
+4. If pain was reported and Gemini re-assesses a non-trivial injury, the merged injury profile is passed into the regen.
+5. The merged schedule replaces `window._currentSchedule` and is persisted to `training_schedule`.
+
+### Excel export additions
+
+- A **Status** column (after Day) shows `✓ Done` or `✗ Missed` for checked-in sessions, colored green/red.
+- The Summary sheet gains a **Check-In Summary** section: total weeks logged, average completion percentage, and a per-week breakdown with session rate and any pain notes.
+
+---
+
 ## What Comes Next
 
 - User testing and iterative refinements

@@ -60,3 +60,33 @@ The same applies to peak weekly mileage: the `PEAK_MILEAGE` table in `app.js` is
 Keyword matching treats every mention of "knee" the same regardless of context. "Slight knee soreness after a hard race" and "dislocated knee" both match the `knee` keyword and historically both produced `moderate` severity. The fundamental problem: severity isn't about which body part is mentioned — it's about the nature and acuity of the problem. Only a language model can make that distinction reliably from free text.
 
 The keyword fallback (used when no Gemini API key is provided) is still useful for identifying *which* injury type is mentioned and applying the corresponding avoid list and rehab exercises — but severity classification from keywords alone is inherently coarse.
+
+---
+
+## Research Domain Protocols, Don't Guess Numbers *(2026-05-17)*
+
+### The problem with intuitive thresholds
+
+When implementing the check-in underperformance adjustments, the obvious temptation is to pick round numbers that "feel right": cut mileage by 20% if the user missed half their sessions, hold for a week if they missed one. But intuitive numbers in a health domain carry real risk — a plan that ramps too aggressively after underperformance increases injury risk; one that backs off too conservatively kills fitness adaptation before the race.
+
+### What the research actually says
+
+The adjustment protocol used in `applyCheckinAdjustments` was grounded in documented principles rather than invented:
+
+**80% completion threshold**: Coaches and exercise scientists treat ~80% session completion as the boundary between "normal variation" (life happens, skip a run) and "the training load is mismatched to the athlete." Below 80% consistently signals a structural problem — the prescribed load is too high for the athlete's current recovery capacity.
+
+**10% mileage reduction for sustained underperformance**: The same 10% figure from the injury-prevention literature (don't increase more than 10% per week) applies in reverse: a 10% downward adjustment is a meaningful but non-destructive correction. Cutting 20–30% wastes weeks of accumulated fitness; cutting 5% is noise.
+
+**One frozen week, not a full restart**: Holding week N+1 at the same mileage as week N gives the body one additional recovery stimulus without abandoning the plan progression. This is analogous to adding an unplanned cutback week — standard coaching practice when an athlete shows signs of overreaching.
+
+**Downgrade quality sessions before downgrading volume**: When both a quality session was missed and completion is low, the safest next step is to replace the *first* easy run with a Recovery Run. Volume stays the same; intensity is briefly reduced. This follows the "reduce intensity before reducing volume" principle — aerobic base is preserved while fatigue is managed.
+
+### How to apply this going forward
+
+Before choosing a threshold or correction magnitude in any health or fitness feature:
+
+1. **Name the principle first.** Can you state in one sentence the physiological or coaching rationale for the number?
+2. **Find a published reference.** Higdon, Pfitzinger, Daniels, or peer-reviewed exercise science — any of these beats intuition.
+3. **Document the rejected alternative.** If you considered a different threshold and rejected it (e.g. 70% vs. 80%, 15% mileage cut vs. 10%), write down why in the knowledge file. Future maintainers will otherwise re-derive the same question.
+
+The same discipline that produced the `PEAK_LONG_RUN` lookup table (see `training-domain.md — The Multiplier Formula Problem`) should govern every domain-specific threshold in the app.

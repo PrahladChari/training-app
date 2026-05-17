@@ -539,3 +539,164 @@ input[type="number"] {
   vertical-align: middle;
   text-transform: uppercase;
 }
+
+/* ── Check-In Section ────────────────────────────────────────── */
+.checkin-card {
+  background: #fff;
+  border: 1px solid #e4e4e4;
+  border-radius: 12px;
+  padding: 28px 32px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
+.checkin-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin: 0 0 24px;
+}
+
+.checkin-section-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #444;
+  margin: 0 0 10px;
+}
+
+/* Session checkbox list */
+.checkin-session-list {
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.checkin-session-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f0;
+  transition: background 0.15s;
+  user-select: none;
+}
+
+.checkin-session-item:last-child { border-bottom: none; }
+.checkin-session-item:hover { background: #f8f9ff; }
+
+.checkin-session-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #3a7bfd;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.ci-day  { font-weight: 600; font-size: 13px; color: #444; width: 36px; flex-shrink: 0; }
+.ci-type { font-size: 14px; color: #1a1a2e; flex: 1; }
+.ci-dist { font-size: 13px; color: #888; }
+
+/* Rating buttons */
+.checkin-rating { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.rating-option {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #444;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.rating-option:has(input:checked) {
+  border-color: #3a7bfd;
+  background: #f0f5ff;
+  color: #3a7bfd;
+  font-weight: 600;
+}
+
+.rating-option input[type="radio"] { display: none; }
+
+/* Submit button */
+.btn-checkin {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  background: #3a7bfd;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 20px;
+  transition: background 0.2s;
+}
+
+.btn-checkin:hover    { background: #2b6de8; }
+.btn-checkin:disabled { background: #a0b8f8; cursor: not-allowed; }
+
+/* Result banner */
+.checkin-result {
+  margin-top: 16px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.cr-good     { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+.cr-adjusted { background: #fff3e0; color: #bf360c; border: 1px solid #ffe0b2; }
+
+/* Check-in history */
+.checkin-history-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin: 0 0 12px;
+}
+
+.checkin-history-card {
+  background: #fff;
+  border: 1px solid #e4e4e4;
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.chc-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.chc-week       { font-weight: 700; font-size: 14px; color: #1a1a2e; }
+.chc-phase      { font-size: 12px; color: #888; background: #f0f0f0; padding: 2px 8px; border-radius: 10px; }
+.chc-completion { font-size: 13px; color: #444; margin-left: auto; }
+.chc-rating     { font-size: 13px; color: #f9a825; letter-spacing: 1px; }
+
+.chc-sessions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+
+.chc-session-dot {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.chc-done { background: #e8f5e9; color: #2e7d32; }
+.chc-miss { background: #fce4ec; color: #c62828; }
+
+.chc-pain { margin-top: 6px; font-size: 12px; color: #888; font-style: italic; }
+
+/* Status column in preview table */
+td.status-completed { color: #2e7d32; font-size: 12px; font-weight: 600; white-space: nowrap; }
+td.status-missed    { color: #c62828; font-size: 12px; font-weight: 600; white-space: nowrap; }

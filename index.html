@@ -243,6 +243,7 @@
             <th>Week Start</th>
             <th>Date</th>
             <th>Day</th>
+            <th>Status</th>
             <th>Type</th>
             <th>Distance / Duration</th>
             <th>Notes</th>
@@ -252,6 +253,52 @@
         <tbody id="previewTbody"></tbody>
       </table>
     </div>
+  </div>
+
+  <!-- Check-In Section (hidden until a plan exists) -->
+  <div id="checkinSection" style="display: none; max-width: 900px; margin: 24px auto 0;">
+
+    <div class="checkin-card">
+      <h3 class="checkin-title">Weekly Check-In</h3>
+
+      <div class="field">
+        <label for="checkinWeekSelect">Week</label>
+        <select id="checkinWeekSelect" onchange="renderCheckinForm(parseInt(this.value))"></select>
+      </div>
+
+      <div class="field">
+        <p class="checkin-section-label">Sessions completed this week</p>
+        <div id="checkinSessionList" class="checkin-session-list"></div>
+      </div>
+
+      <div class="field">
+        <p class="checkin-section-label">How did this week feel?</p>
+        <div class="checkin-rating">
+          <label class="rating-option"><input type="radio" name="checkinRating" value="1"> 1 — Very hard</label>
+          <label class="rating-option"><input type="radio" name="checkinRating" value="2"> 2</label>
+          <label class="rating-option"><input type="radio" name="checkinRating" value="3" checked> 3 — OK</label>
+          <label class="rating-option"><input type="radio" name="checkinRating" value="4"> 4</label>
+          <label class="rating-option"><input type="radio" name="checkinRating" value="5"> 5 — Strong</label>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="checkinPain">Any pain or new issues? <span class="optional-tag">optional</span></label>
+        <textarea id="checkinPain" rows="2" placeholder="e.g. slight IT band tightness on the long run"></textarea>
+      </div>
+
+      <div class="field">
+        <label for="checkinNotes">Notes <span class="optional-tag">optional</span></label>
+        <textarea id="checkinNotes" rows="2" placeholder="e.g. skipped Friday due to travel"></textarea>
+      </div>
+
+      <button type="button" class="btn-checkin" id="checkinSubmitBtn" onclick="submitCheckin()">Submit Check-In</button>
+
+      <div id="checkinResult" class="checkin-result" style="display: none;"></div>
+    </div>
+
+    <div id="checkinHistory"></div>
+
   </div>
 
   <script src="app.js"></script>

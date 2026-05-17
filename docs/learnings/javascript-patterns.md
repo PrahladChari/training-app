@@ -178,3 +178,48 @@ The interval type name is now a precise string (`'Interval — 6 × 800m'`) rath
 `let` and `const` declarations are *hoisted* (the variable name is known to the scope from the start) but not *initialized* — accessing them before their declaration line evaluates throws a `ReferenceError`. This is called the Temporal Dead Zone. Unlike `var` (which initializes to `undefined` on hoist), `let` gives you an error, which is safer but can be surprising.
 
 In a large single-file app where declarations and references are hundreds of lines apart, TDZ errors can crash silently — the error appears in the console but doesn't surface to the user, and all subsequent code in the script block stops executing. The lesson: in any large inline script, declare variables before the earliest function that references them, not next to the code that "owns" them logically. For shared state like `_stravaWeeklyMiles`, the declaration belongs near the top of the script, not buried in the feature section.
+
+---
+
+## Full Schedule Persistence for Multi-Session Workflows *(2026-05-17)*
+
+### Why it matters
+
+A training plan spans 12–18 weeks. Without persistence, every browser refresh or tab close resets the app to blank — the user must regenerate their plan from scratch and lose any check-in history. This is fine for a demo but not for any tool someone uses week after week.
+
+The fix is two localStorage keys written on every plan generation and every check-in submission:
+
+| Key | Contents |
+|---|---|
+| `training_schedule` | Full `{ schedule, meta, inputs }` snapshot — the schedule array, the meta object (planId, phases, totalWeeks, etc.), and the raw form inputs that produced it |
+| `training_checkins` | Array of all check-in records, keyed by `planId` and `weekNumber` — survives plan regenerations because `planId` is preserved across regens |
+
+On page load, a `restorePlanFromStorage()` call rehydrates `window._currentSchedule` and `window._currentInputs` and re-renders both the preview table and check-in section. The user lands back where they left off without touching the form.
+
+### The planId is load-bearing
+
+`planId` is a `Date.now()` timestamp set once when the form is first submitted and threaded through every subsequent regen. This is what ties check-in history to a specific plan. Without a stable ID, a regenerated schedule would be orphaned from its check-ins. The rule: set `planId` at creation, never change it on regen — always pass `_planId: meta.planId` into `generateSchedule` when regenerating.
+
+### Upsert, not append
+
+Check-ins are stored as an array with an upsert pattern: find-and-replace if the same `(planId, weekNumber)` pair exists, otherwise append. This lets the user update a week's check-in after the fact (e.g. they forgot to log Thursday's run) without accumulating duplicate records.
+
+---
+
+## Bridging localStorage to a Future Database
+
+### The localStorage layer as an interface boundary
+
+The two storage functions (`savePlanToStorage` / `restorePlanFromStorage`, `getCheckins` / `saveCheckins`) are thin wrappers around `localStorage.getItem/setItem` with JSON serialization. This is intentional: all reads and writes go through these four functions — nothing in the rest of the app touches localStorage directly.
+
+When the time comes to move to a real backend (IndexedDB, a REST API, Supabase), only these four functions need to change. The rest of the app — schedule generation, check-in logic, rendering — calls the same interface and remains untouched.
+
+### What to preserve when migrating
+
+Three things make a localStorage → database migration non-trivial in a training app:
+
+1. **planId stability**: The ID must migrate with the plan record. A new auto-increment ID from the DB would break all existing check-in linkage.
+2. **Date serialization**: Dates are stored as ISO strings (`YYYY-MM-DD`). A database that stores timestamps needs a conversion at the boundary — not in the core logic.
+3. **Optimistic UI**: localStorage writes are synchronous and instant. A database write is async and can fail. The migration point is a good time to add loading states and error handling to the storage functions — but that cost is paid once at the boundary, not scattered through the feature code.
+
+The pattern to follow: keep the same four-function interface, make them `async`, handle errors at that layer, and add a `userId` field to the stored records when authentication is introduced.
