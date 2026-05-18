@@ -1,4 +1,17 @@
-﻿// ── Schedule Generation ───────────────────────────────────────
+﻿// ── Supabase ──────────────────────────────────────────────────
+const SUPABASE_URL = 'https://yhhhrclqjtpcgeocjyeo.supabase.co'
+const SUPABASE_KEY = 'sb_publishable_8D0zKN4Rjtyjuyy_7cMZBQ_FNGc8cA2'
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
+
+// race_distance values in app → CHECK constraint values in DB
+const RACE_DIST_NORM = { '5k':'5K', '10k':'10K', 'half':'Half', 'full':'Marathon', 'custom':'Custom' }
+
+// cache of plans fetched on login — used by loadSavedPlan without a second request
+let _userPlans       = []
+let _isLoggedIn      = false
+let _pendingDeleteId = null
+
+// ── Schedule Generation ───────────────────────────────────────
 
 const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
@@ -778,6 +791,10 @@ document.getElementById('plannerForm').addEventListener('submit', async function
 
   // Persist plan and original inputs for check-in regeneration
   savePlanToStorage(result, inputs);
+  syncPlanToSupabase(result, inputs).catch(e => {
+    console.warn('[Supabase] plan sync:', e.message);
+    showToast('Plan saved locally — sync failed', 'warn');
+  });
 
   const { totalWeeks, histWeeks, phases, raceDateOriginal, raceDateAdjusted, ambitionWarning } = result.meta;
   let msg = `Plan generated: ${totalWeeks} weeks — Base ${phases.base} / Build ${phases.build} / Peak ${phases.peak} / Taper ${phases.taper}.`;
@@ -1712,12 +1729,16 @@ function saveArchivedPlans(arr) {
 // ── Tab switching ─────────────────────────────────────────────
 
 function switchTab(tab) {
-  if (tab === 'track' && !window._currentSchedule) return;
-  const isGenerate = tab === 'generate';
-  document.getElementById('panelGenerate').style.display = isGenerate ? '' : 'none';
-  document.getElementById('panelTrack').style.display    = isGenerate ? 'none' : '';
-  document.getElementById('tabGenerate').className = 'tab-btn' + (isGenerate ? ' tab-active' : '');
-  document.getElementById('tabTrack').className    = 'tab-btn' + (!isGenerate ? ' tab-active' : (window._currentSchedule ? '' : ' tab-locked'));
+  if (tab === 'track'     && !window._currentSchedule) return;
+  if (tab === 'dashboard' && !_isLoggedIn)             return;
+
+  document.getElementById('panelGenerate').style.display  = tab === 'generate'  ? '' : 'none';
+  document.getElementById('panelTrack').style.display     = tab === 'track'     ? '' : 'none';
+  document.getElementById('panelDashboard').style.display = tab === 'dashboard' ? '' : 'none';
+
+  document.getElementById('tabGenerate').className  = 'tab-btn' + (tab === 'generate'  ? ' tab-active' : '');
+  document.getElementById('tabTrack').className     = 'tab-btn' + (tab === 'track'     ? ' tab-active' : (!window._currentSchedule ? ' tab-locked' : ''));
+  document.getElementById('tabDashboard').className = 'tab-btn' + (tab === 'dashboard' ? ' tab-active' : (!_isLoggedIn             ? ' tab-locked' : ''));
 }
 
 function enableTrackTab() {
@@ -2305,6 +2326,10 @@ async function submitCheckin() {
   const idx = allCheckins.findIndex(c => c.planId === meta.planId && c.weekNumber === weekNum);
   if (idx >= 0) allCheckins[idx] = checkin; else allCheckins.push(checkin);
   saveCheckins(allCheckins);
+  syncCheckinToSupabase(checkin).catch(e => {
+    console.warn('[Supabase] checkin sync:', e.message);
+    showToast('Check-in saved locally — sync failed', 'warn');
+  });
 
   // Injury assessment (informational only — no plan regeneration)
   const btn = document.getElementById('checkinSubmitBtn');
@@ -2348,7 +2373,450 @@ async function submitCheckin() {
   resultEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+// ── Auth UI helpers ───────────────────────────────────────────
+
+function hasLocalPlan() {
+  try {
+    const stored = JSON.parse(localStorage.getItem('training_schedule'));
+    return !!(stored?.schedule?.length);
+  } catch { return false; }
+}
+
+function showAuthPanel() {
+  document.getElementById('panelAuth').style.display       = '';
+  document.getElementById('panelGenerate').style.display   = 'none';
+  document.getElementById('panelTrack').style.display      = 'none';
+  document.getElementById('panelDashboard').style.display  = 'none';
+  document.getElementById('tabGenerate').className         = 'tab-btn tab-locked';
+  document.getElementById('tabTrack').className            = 'tab-btn tab-locked';
+  document.getElementById('tabDashboard').className        = 'tab-btn tab-locked';
+}
+
+// State 2: auth panel visible + Generate panel open + warning banner shown
+function showAppWithWarning() {
+  document.getElementById('panelAuth').style.display          = '';
+  document.getElementById('panelGenerate').style.display      = '';
+  document.getElementById('panelTrack').style.display         = 'none';
+  document.getElementById('panelDashboard').style.display     = 'none';
+  document.getElementById('tabGenerate').className            = 'tab-btn tab-active';
+  document.getElementById('tabTrack').className               = 'tab-btn';
+  document.getElementById('tabDashboard').className           = 'tab-btn tab-locked';
+  document.getElementById('localWarningBanner').style.display = '';
+}
+
+function hideLocalWarning() {
+  document.getElementById('localWarningBanner').style.display = 'none';
+}
+
+function focusAuthForm() {
+  const el = document.getElementById('authEmail');
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.focus();
+}
+
+function showAppPanels(hasSchedule) {
+  document.getElementById('panelAuth').style.display      = 'none';
+  document.getElementById('panelGenerate').style.display  = '';
+  document.getElementById('panelTrack').style.display     = 'none';
+  document.getElementById('tabGenerate').className        = 'tab-btn tab-active';
+  document.getElementById('tabTrack').className           = 'tab-btn' + (hasSchedule ? '' : ' tab-locked');
+}
+
+function showDashboard() {
+  document.getElementById('panelAuth').style.display       = 'none';
+  document.getElementById('panelGenerate').style.display   = 'none';
+  document.getElementById('panelTrack').style.display      = 'none';
+  document.getElementById('panelDashboard').style.display  = '';
+  document.getElementById('tabGenerate').className         = 'tab-btn';
+  document.getElementById('tabTrack').className            = 'tab-btn' + (window._currentSchedule ? '' : ' tab-locked');
+  document.getElementById('tabDashboard').className        = 'tab-btn tab-active';
+}
+
+function setUserChip(email) {
+  const chip = document.getElementById('userChip');
+  if (email) {
+    document.getElementById('userEmail').textContent = email;
+    chip.style.display = 'flex';
+  } else {
+    chip.style.display = 'none';
+  }
+}
+
+function setAuthMessage(type, msg) {
+  const el = document.getElementById(type === 'error' ? 'authError' : 'authInfo');
+  el.textContent    = msg;
+  el.style.display  = msg ? 'block' : 'none';
+  // clear the other one
+  const other = document.getElementById(type === 'error' ? 'authInfo' : 'authError');
+  other.style.display = 'none';
+}
+
+function hideSavedPlansPicker() {
+  document.getElementById('savedPlansPicker').style.display = 'none';
+}
+
+function startNewPlan() {
+  hideSavedPlansPicker();
+}
+
+async function authSignIn() {
+  const email    = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  setAuthMessage('error', '');
+
+  if (!email || !password) { setAuthMessage('error', 'Email and password are required.'); return; }
+
+  const btn = document.getElementById('authSignInBtn');
+  btn.disabled = true; btn.textContent = 'Logging in…';
+
+  const { error } = await db.auth.signInWithPassword({ email, password });
+
+  btn.disabled = false; btn.textContent = 'Log In';
+
+  if (error) {
+    const msg = /invalid/i.test(error.message)
+      ? 'Invalid email or password.'
+      : /not confirmed/i.test(error.message)
+      ? 'Check your inbox to confirm your email before logging in.'
+      : 'Could not connect. Check your internet and try again.';
+    setAuthMessage('error', msg);
+  }
+  // success: onAuthStateChange handles UI
+}
+
+async function authSignUp() {
+  const email    = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  setAuthMessage('error', '');
+
+  if (!email)               { setAuthMessage('error', 'Email is required.'); return; }
+  if (password.length < 6)  { setAuthMessage('error', 'Password must be at least 6 characters.'); return; }
+
+  const btn = document.getElementById('authSignUpBtn');
+  btn.disabled = true; btn.textContent = 'Creating account…';
+
+  const { data, error } = await db.auth.signUp({ email, password });
+
+  btn.disabled = false; btn.textContent = 'Sign Up';
+
+  if (error) {
+    const msg = /already registered|already exists/i.test(error.message)
+      ? 'An account with this email already exists. Try logging in.'
+      : 'Could not create account. Check your internet and try again.';
+    setAuthMessage('error', msg);
+  } else if (data.user && !data.session) {
+    setAuthMessage('info', 'Account created! Check your inbox to confirm your email, then log in.');
+  }
+  // auto-confirmed: onAuthStateChange handles UI
+}
+
+async function authSignOut() {
+  await db.auth.signOut();
+  // onAuthStateChange handles UI
+}
+
+function showToast(msg, type = 'ok') {
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  requestAnimationFrame(() => requestAnimationFrame(() => t.classList.add('toast-show')));
+  setTimeout(() => {
+    t.classList.remove('toast-show');
+    setTimeout(() => t.remove(), 300);
+  }, 4000);
+}
+
+// ── Supabase data sync ────────────────────────────────────────
+
+async function syncPlanToSupabase(result, inputs) {
+  const { data: { session } } = await db.auth.getSession();
+  if (!session) return;
+
+  const raceDate = result.meta.raceDateAdjusted || result.meta.raceDateOriginal || null;
+  const raceDist = RACE_DIST_NORM[inputs.raceDistance] || 'Custom';
+  const payload  = {
+    planId:   result.meta.planId,
+    schedule: result.schedule,
+    meta:     result.meta,
+    inputs:   sanitizeInputsForStorage(inputs),
+  };
+
+  const { data, error } = await db.from('plans').insert({
+    user_id:       session.user.id,
+    race_date:     raceDate,
+    race_distance: raceDist,
+    fitness_level: inputs.fitnessCardio || 'beginner',
+    data:          payload,
+  }).select('id').single();
+
+  if (error) throw error;
+
+  result.meta.supabasePlanId    = data.id;
+  window._currentSchedule       = result;
+  // Persist supabasePlanId into localStorage so check-ins can find it after refresh
+  try {
+    const raw = localStorage.getItem('training_schedule');
+    if (raw) {
+      const stored = JSON.parse(raw);
+      stored.meta.supabasePlanId = data.id;
+      localStorage.setItem('training_schedule', JSON.stringify(stored));
+    }
+  } catch { /* non-critical */ }
+
+  // Refresh dashboard so the new plan card appears immediately
+  _userPlans = await loadUserPlans(session.user.id);
+  renderDashboard(_userPlans);
+  switchTab('dashboard');
+
+  return data.id;
+}
+
+async function syncCheckinToSupabase(checkin) {
+  const { data: { session } } = await db.auth.getSession();
+  if (!session) return;
+
+  // If the plan hasn't been synced to Supabase yet, try syncing it first
+  let supabasePlanId = window._currentSchedule?.meta?.supabasePlanId;
+  if (!supabasePlanId && window._currentSchedule && window._currentInputs) {
+    supabasePlanId = await syncPlanToSupabase(window._currentSchedule, window._currentInputs);
+  }
+  if (!supabasePlanId) return;
+
+  const { error } = await db.from('checkins').upsert({
+    plan_id:     supabasePlanId,
+    week_number: checkin.weekNumber,
+    sessions:    checkin.sessions,
+  }, { onConflict: 'plan_id,week_number' });
+
+  if (error) throw error;
+}
+
+async function loadUserPlans(userId) {
+  const { data: { session } } = await db.auth.getSession();
+  console.log('[diag] Session exists:', !!session);
+  console.log('[diag] Session user ID:', session?.user?.id);
+  console.log('[diag] userId arg:', userId);
+
+  const { data, error } = await db.from('plans').select('id');
+  console.log('[diag] plans?select=id response:', { data, error });
+
+  const { data: full, error: fullErr } = await db
+    .from('plans')
+    .select('id, race_date, race_distance, fitness_level, created_at, data, checkins(week_number, created_at)')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(10);
+
+  console.log('[diag] full select response:', { data: full, error: fullErr });
+
+  if (fullErr) { console.warn('[Supabase] loadUserPlans:', fullErr.message); return []; }
+  return full || [];
+}
+
+function cap(s) { return s ? s[0].toUpperCase() + s.slice(1) : s; }
+
+function renderSavedPlansPicker(plans) {
+  const picker = document.getElementById('savedPlansPicker');
+  const today  = new Date(); today.setHours(0, 0, 0, 0);
+
+  let html = '<div class="spp-title">Your saved plans</div>';
+
+  for (const plan of plans) {
+    const raceDate  = plan.race_date ? parseLocalDate(plan.race_date) : null;
+    const weeksLeft = raceDate ? Math.max(0, Math.ceil((raceDate - today) / (7 * 86400000))) : null;
+    const maxWk     = plan.checkins?.length ? Math.max(...plan.checkins.map(c => c.week_number)) : null;
+    const created   = new Date(plan.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    const weeksStr  = weeksLeft !== null
+      ? `${weeksLeft} week${weeksLeft !== 1 ? 's' : ''} remaining`
+      : 'Race date passed';
+    const checkinStr = maxWk ? `Last check-in: Week ${maxWk}` : 'No check-ins yet';
+
+    html += `
+      <div class="spp-card">
+        <div class="spp-card-body">
+          <div class="spp-card-meta">
+            <span class="spp-dist">${plan.race_distance} · ${cap(plan.fitness_level)}</span>
+            <span class="spp-created">${created}</span>
+          </div>
+          <div class="spp-card-sub">
+            <span>Race: ${plan.race_date || '—'} · ${weeksStr}</span>
+            <span class="spp-checkin">${checkinStr}</span>
+          </div>
+        </div>
+        <button class="btn-load-plan" onclick="loadSavedPlan('${plan.id}')">Load</button>
+      </div>`;
+  }
+
+  html += '<button class="btn-new-plan" onclick="startNewPlan()">+ Start a new plan</button>';
+  picker.innerHTML      = html;
+  picker.style.display  = 'block';
+}
+
+async function loadSavedPlan(supabasePlanId) {
+  const plan = _userPlans.find(p => p.id === supabasePlanId);
+  if (!plan?.data) return;
+
+  const stored = plan.data;
+  if (stored.inputs?.trainingStartDate) {
+    stored.inputs.trainingStartDate = parseLocalDate(stored.inputs.trainingStartDate);
+  }
+  stored.meta.supabasePlanId = supabasePlanId;
+
+  window._currentSchedule = { schedule: stored.schedule, meta: stored.meta };
+  window._currentInputs   = stored.inputs;
+
+  renderPreview(window._currentSchedule);
+  renderCheckinSection();          // also calls enableTrackTab()
+  hideSavedPlansPicker();
+  switchTab('generate');
+}
+
+// ── Dashboard ─────────────────────────────────────────────────
+
+function renderDashboard(plans) {
+  const container = document.getElementById('dashboardGrid');
+  const today     = new Date(); today.setHours(0, 0, 0, 0);
+
+  if (!plans.length) {
+    container.innerHTML = '<p class="dashboard-empty">No plans yet. Click <strong>+ Create New Plan</strong> to get started.</p>';
+    return;
+  }
+
+  const trashIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>`;
+
+  container.innerHTML = plans.map(plan => {
+    const raceDate    = plan.race_date ? parseLocalDate(plan.race_date) : null;
+    const isPast      = raceDate && raceDate < today;
+    const status      = isPast ? 'Completed' : 'In Progress';
+    const badgeCls    = isPast ? 'status-badge status-completed' : 'status-badge status-in-progress';
+    const raceDateStr = raceDate
+      ? raceDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      : '—';
+    const totalWks   = plan.data?.meta?.totalWeeks ?? '—';
+    const doneWks    = plan.checkins?.length ?? 0;
+    const createdStr = new Date(plan.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+    return `
+      <div class="plan-card" onclick="loadSavedPlan('${plan.id}')">
+        <div class="plan-card-header">
+          <span class="plan-card-title">${plan.race_distance} &mdash; ${raceDateStr}</span>
+          <div class="plan-card-header-right">
+            <span class="${badgeCls}">${status}</span>
+            <button class="btn-delete" title="Delete plan" onclick="openDeleteModal('${plan.id}'); event.stopPropagation();">${trashIcon}</button>
+          </div>
+        </div>
+        <div class="plan-card-body">
+          <span>${doneWks} / ${totalWks} weeks completed</span>
+          <span class="plan-card-updated">Created ${createdStr}</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function openDeleteModal(planId) {
+  _pendingDeleteId = planId;
+  document.getElementById('confirmModal').style.display = 'flex';
+}
+
+function closeModal() {
+  _pendingDeleteId = null;
+  document.getElementById('confirmModal').style.display = 'none';
+}
+
+async function confirmDelete() {
+  if (!_pendingDeleteId) return;
+  const planId = _pendingDeleteId;
+  closeModal();
+  try {
+    await deletePlan(planId);
+  } catch (e) {
+    console.warn('[Supabase] delete plan:', e.message);
+    showToast('Failed to delete plan', 'warn');
+  }
+}
+
+async function deletePlan(supabasePlanId) {
+  const { error } = await db.from('plans').delete().eq('id', supabasePlanId);
+  if (error) throw error;
+
+  // Clear localStorage if the stored plan is the one being deleted
+  try {
+    const raw = localStorage.getItem('training_schedule');
+    if (raw) {
+      const stored = JSON.parse(raw);
+      if (stored.meta?.supabasePlanId === supabasePlanId) {
+        localStorage.removeItem('training_schedule');
+        localStorage.removeItem('training_checkins');
+      }
+    }
+  } catch { /* non-critical */ }
+
+  // Clear active state if this is the current plan
+  if (window._currentSchedule?.meta?.supabasePlanId === supabasePlanId) {
+    window._currentSchedule = null;
+    window._currentInputs   = null;
+    document.getElementById('previewSection').style.display = 'none';
+    document.getElementById('exportSection').style.display  = 'none';
+    document.getElementById('tabTrack').classList.add('tab-locked');
+  }
+
+  _userPlans = _userPlans.filter(p => p.id !== supabasePlanId);
+  renderDashboard(_userPlans);
+  showToast('Plan deleted', 'ok');
+}
+
+function createNewPlan() {
+  window._currentSchedule = null;
+  window._currentInputs   = null;
+  document.getElementById('plannerForm').reset();
+  document.getElementById('previewSection').style.display = 'none';
+  document.getElementById('exportSection').style.display  = 'none';
+  document.getElementById('previewTbody').innerHTML       = '';
+  switchTab('generate');
+}
+
+// ── Auth state handler (drives all tab/panel visibility) ──────
+
+async function handleAuthStateChange(event, session) {
+  if (!session) {
+    _isLoggedIn = false;
+    setUserChip(null);
+    window._currentSchedule = null;   // clear stale state from previous session
+    window._currentInputs   = null;
+    _userPlans = [];
+
+    if (hasLocalPlan()) {
+      showAppWithWarning();            // State 2: local plan, no account
+      restorePlanFromStorage();
+      if (window._currentSchedule) enableTrackTab();
+    } else {
+      showAuthPanel();                 // State 1: nothing local, must sign in
+    }
+    return;
+  }
+
+  // State 3: logged in
+  _isLoggedIn = true;
+  setUserChip(session.user.email);
+  hideLocalWarning();
+  showDashboard();   // land on Dashboard immediately before async plan fetch
+
+  const plans = await loadUserPlans(session.user.id);
+  _userPlans  = plans;
+  renderDashboard(plans);
+}
+
 // ── Load-time init ────────────────────────────────────────────
+
+// onAuthStateChange fires immediately with INITIAL_SESSION (stored session or null),
+// then again on SIGNED_IN / SIGNED_OUT. It is the single source of truth for
+// panel visibility and tab lock state.
+db.auth.onAuthStateChange((event, session) => {
+  if (event === 'TOKEN_REFRESHED' || event === 'PASSWORD_RECOVERY') return;
+  handleAuthStateChange(event, session);
+});
+
 (async function stravaOnLoad() {
   const handled = await stravaHandleCallback();
   if (handled) return;
@@ -2356,5 +2824,3 @@ async function submitCheckin() {
     setDataSource('strava');
   }
 })();
-
-restorePlanFromStorage();

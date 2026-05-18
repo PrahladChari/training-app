@@ -5,21 +5,63 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Training Planner</title>
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4/dist/exceljs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
-  <div style="max-width: 680px; margin: 0 auto;">
-    <h1>Training Planner</h1>
-    <p class="subtitle">Fill out the form below to generate your week-by-week training schedule.</p>
+  <div class="app-header">
+    <div>
+      <h1>Training Planner</h1>
+      <p class="subtitle">Fill out the form below to generate your week-by-week training schedule.</p>
+    </div>
+    <div id="userChip" class="user-chip" style="display:none">
+      <span id="userEmail" class="user-email"></span>
+      <button type="button" class="btn-logout" onclick="authSignOut()">Log out</button>
+    </div>
+  </div>
+
+  <!-- Auth panel — shown when logged out -->
+  <div id="panelAuth" style="display:none; max-width:480px; margin:0 auto;">
+    <div class="auth-card">
+      <h2 class="auth-title">Sign in to sync across devices</h2>
+      <div class="field">
+        <label for="authEmail">Email</label>
+        <input type="email" id="authEmail" placeholder="you@example.com" autocomplete="email" />
+      </div>
+      <div class="field">
+        <label for="authPassword">Password</label>
+        <input type="password" id="authPassword" placeholder="••••••••" autocomplete="current-password" />
+      </div>
+      <div class="auth-actions">
+        <button type="button" class="btn-auth-primary" id="authSignInBtn" onclick="authSignIn()">Log In</button>
+        <button type="button" class="btn-auth-secondary" id="authSignUpBtn" onclick="authSignUp()">Sign Up</button>
+      </div>
+      <div id="authError" class="auth-error" style="display:none"></div>
+      <div id="authInfo"  class="auth-info"  style="display:none"></div>
+    </div>
   </div>
 
   <div class="tab-nav">
-    <button class="tab-btn tab-active" id="tabGenerate" onclick="switchTab('generate')">Generate Plan</button>
-    <button class="tab-btn tab-locked" id="tabTrack" onclick="switchTab('track')">Track Progress</button>
+    <button class="tab-btn tab-locked" id="tabGenerate"  onclick="switchTab('generate')">Generate Plan</button>
+    <button class="tab-btn tab-locked" id="tabTrack"     onclick="switchTab('track')">Track Progress</button>
+    <button class="tab-btn tab-locked" id="tabDashboard" onclick="switchTab('dashboard')">Dashboard</button>
   </div>
 
-  <div id="panelGenerate">
+  <div id="panelGenerate" style="display:none">
+
+  <!-- Local-only warning — shown in State 2 (no session, local plan exists) -->
+  <div id="localWarningBanner" style="display:none; max-width:680px; margin:0 auto 16px;">
+    <div class="local-warning">
+      Your plan is saved locally only.
+      <a href="#" class="local-warning-link" onclick="focusAuthForm(); return false;">Log In</a> or
+      <a href="#" class="local-warning-link" onclick="focusAuthForm(); return false;">Sign Up</a>
+      to sync across devices.
+    </div>
+  </div>
+
+  <!-- Saved plans picker — shown after login when plans exist -->
+  <div id="savedPlansPicker" style="display:none; max-width:680px; margin:0 auto 24px;"></div>
 
   <form class="form-card" id="plannerForm">
 
@@ -306,6 +348,28 @@
     </div>
 
   </div><!-- end #panelTrack -->
+
+  <!-- Tab 3: Dashboard -->
+  <div id="panelDashboard" style="display:none;">
+    <div style="max-width:900px; margin:0 auto; padding:0 0 40px;">
+      <div class="dashboard-header">
+        <h2>Your Plans</h2>
+        <button class="btn-create-plan" onclick="createNewPlan()">+ Create New Plan</button>
+      </div>
+      <div id="dashboardGrid" class="dashboard-grid"></div>
+    </div>
+  </div>
+
+  <!-- Delete confirmation modal -->
+  <div id="confirmModal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)closeModal()">
+    <div class="modal-confirm">
+      <p class="modal-msg">Delete this plan? This cannot be undone.</p>
+      <div class="modal-actions">
+        <button class="btn-modal-cancel"  onclick="closeModal()">Cancel</button>
+        <button class="btn-modal-confirm" onclick="confirmDelete()">Delete</button>
+      </div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 
